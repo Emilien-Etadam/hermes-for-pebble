@@ -7,7 +7,7 @@
 #endif
 
 #define INBOX_SIZE 2048
-#define OUTBOX_SIZE 256
+#define OUTBOX_SIZE_MIN 512
 #define STATUS_HEIGHT 28
 #define STATUS_TEXT_MAX 128
 #define TRANSCRIPT_MAX 512
@@ -77,23 +77,29 @@ static bool reply_accum_append(const char *chunk) {
 }
 
 static void reply_finalize(void) {
-  reply_display_reset();
+  char *previous_display = s_reply_display;
 
   if (s_reply_accum != NULL && s_reply_accum_len > 0) {
     s_reply_display = s_reply_accum;
     s_reply_accum = NULL;
     s_reply_accum_len = 0;
+  } else {
+    s_reply_display = NULL;
   }
 
   const char *text = s_reply_display != NULL ? s_reply_display : "";
+  const int scroll_width = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.w;
+  const GSize max_size = GSize(scroll_width, 20000);
+
+  text_layer_set_size(s_reply_layer, max_size);
   text_layer_set_text(s_reply_layer, text);
 
-  GSize max_size = GSize(layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.w, 20000);
-  text_layer_set_size(s_reply_layer, max_size);
-
   GSize content_size = text_layer_get_content_size(s_reply_layer);
+  text_layer_set_size(s_reply_layer, GSize(scroll_width, content_size.h));
   scroll_layer_set_content_size(s_scroll_layer, content_size);
   scroll_layer_scroll_to_bottom(s_scroll_layer);
+
+  free(previous_display);
 }
 
 #if defined(PBL_MICROPHONE)
@@ -141,7 +147,10 @@ static void send_prompt(const char *transcript) {
     return;
   }
 
-  app_message_outbox_send();
+  result = app_message_outbox_send();
+  if (result != APP_MSG_OK) {
+    set_status("Envoi impossible");
+  }
 }
 
 static void dictation_session_callback(DictationSession *session, DictationSessionStatus status,
@@ -244,12 +253,13 @@ static void window_load(Window *window) {
 }
 
 static void window_unload(Window *window) {
-  reply_accum_reset();
-  reply_display_reset();
-
+  text_layer_set_text(s_reply_layer, "");
   text_layer_destroy(s_reply_layer);
   scroll_layer_destroy(s_scroll_layer);
   text_layer_destroy(s_status_layer);
+
+  reply_accum_reset();
+  reply_display_reset();
 }
 
 static void init(void) {
@@ -264,7 +274,12 @@ static void init(void) {
   app_message_register_inbox_received(inbox_received_callback);
   app_message_register_inbox_dropped(inbox_dropped_callback);
   app_message_register_outbox_failed(outbox_failed_callback);
-  app_message_open(INBOX_SIZE, OUTBOX_SIZE);
+
+  uint32_t outbox_size = app_message_outbox_size_maximum();
+  if (outbox_size < OUTBOX_SIZE_MIN) {
+    outbox_size = OUTBOX_SIZE_MIN;
+  }
+  app_message_open(INBOX_SIZE, outbox_size);
 
 #if defined(PBL_MICROPHONE)
   s_dictation_session = dictation_session_create(TRANSCRIPT_MAX, dictation_session_callback, NULL);
@@ -282,8 +297,6 @@ static void deinit(void) {
   }
 #endif
 
-  reply_accum_reset();
-  reply_display_reset();
   window_destroy(s_window);
 }
 
