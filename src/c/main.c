@@ -2,10 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(PBL_MICROPHONE)
-#include <dictation.h>
-#endif
-
 #define INBOX_SIZE 2048
 #define OUTBOX_SIZE_MIN 512
 #define STATUS_HEIGHT 28
@@ -111,20 +107,19 @@ static void dictation_status_message(DictationSessionStatus status, char *buffer
     case DictationSessionStatusFailureNoSpeechDetected:
       snprintf(buffer, length, "Aucune voix détectée");
       break;
-    case DictationSessionStatusFailureNetwork:
-    case DictationSessionStatusFailureNetworkTimeout:
+    case DictationSessionStatusFailureConnectivityError:
       snprintf(buffer, length, "Réseau indisponible");
       break;
-    case DictationSessionStatusFailureRecognizerTimeout:
+    case DictationSessionStatusFailureRecognizerError:
       snprintf(buffer, length, "Délai dépassé");
       break;
     case DictationSessionStatusFailureDisabled:
       snprintf(buffer, length, "Dictée désactivée");
       break;
-    case DictationSessionStatusFailureSystemBusy:
+    case DictationSessionStatusFailureSystemAborted:
       snprintf(buffer, length, "Système occupé");
       break;
-    case DictationSessionStatusFailureTooManyRequests:
+    case DictationSessionStatusFailureInternalError:
       snprintf(buffer, length, "Trop de requêtes");
       break;
     default:
@@ -178,12 +173,12 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
 
 static void inbox_received_callback(DictionaryIterator *iter, void *context) {
   Tuple *tuple = dict_find(iter, MESSAGE_KEY_STATUS);
-  if (tuple != NULL && tuple->value->cstring != NULL) {
+  if (tuple != NULL && tuple->value->cstring[0] != '\0') {
     set_status(tuple->value->cstring);
   }
 
   tuple = dict_find(iter, MESSAGE_KEY_REPLY_CHUNK);
-  if (tuple != NULL && tuple->value->cstring != NULL) {
+  if (tuple != NULL && tuple->value->cstring[0] != '\0') {
     if (!reply_accum_append(tuple->value->cstring)) {
       set_status("Mémoire insuffisante");
       reply_accum_reset();
@@ -240,7 +235,7 @@ static void window_load(Window *window) {
 
   s_reply_layer = text_layer_create(GRect(0, 0, bounds.size.w, bounds.size.h - STATUS_HEIGHT));
   text_layer_set_font(s_reply_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
-  text_layer_set_text_wrap(s_reply_layer, true);
+  text_layer_set_overflow_mode(s_reply_layer, GTextOverflowModeWordWrap);
   text_layer_set_background_color(s_reply_layer, GColorClear);
   text_layer_set_text_color(s_reply_layer, GColorWhite);
   scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_reply_layer));
