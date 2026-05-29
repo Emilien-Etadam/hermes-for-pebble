@@ -97,7 +97,7 @@ static void reply_finalize(void) {
   GSize content_size = text_layer_get_content_size(s_reply_layer);
   text_layer_set_size(s_reply_layer, GSize(scroll_width, content_size.h));
   scroll_layer_set_content_size(s_scroll_layer, content_size);
-  scroll_layer_scroll_to_bottom(s_scroll_layer);
+  scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, 0), false);
 
   free(previous_display);
 }
