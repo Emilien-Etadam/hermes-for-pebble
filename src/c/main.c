@@ -173,13 +173,15 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
 
 static void inbox_received_callback(DictionaryIterator *iter, void *context) {
   Tuple *tuple = dict_find(iter, MESSAGE_KEY_STATUS);
-  if (tuple != NULL && tuple->value->cstring[0] != '\0') {
-    set_status(tuple->value->cstring);
+  if (tuple && tuple->length > 1) {
+    const char *s = tuple->value->cstring;
+    set_status(s);
   }
 
   tuple = dict_find(iter, MESSAGE_KEY_REPLY_CHUNK);
-  if (tuple != NULL && tuple->value->cstring[0] != '\0') {
-    if (!reply_accum_append(tuple->value->cstring)) {
+  if (tuple && tuple->length > 1) {
+    const char *s = tuple->value->cstring;
+    if (!reply_accum_append(s)) {
       set_status("Mémoire insuffisante");
       reply_accum_reset();
     }
