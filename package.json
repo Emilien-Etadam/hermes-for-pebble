@@ -1,0 +1,40 @@
+{
+  "name": "hermes-for-pebble",
+  "author": "Hermes",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {
+    "pebble-clay": "^1.0.4"
+  },
+  "pebble": {
+    "displayName": "Hermes for Pebble",
+    "uuid": "24484c4e-36c2-4486-8eaf-e8ff0417ff82",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": [
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery"
+    ],
+    "capabilities": [
+      "microphone",
+      "configurable"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": [
+      "PROMPT",
+      "REPLY_CHUNK",
+      "REPLY_DONE",
+      "STATUS"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}
