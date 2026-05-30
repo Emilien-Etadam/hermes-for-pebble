@@ -7,10 +7,12 @@ var DEFAULT_HERMES_KEY = '';
 var DEFAULT_SESSION_KEY = 'pebble:emilien';
 var DEFAULT_MODEL = 'hermes';
 
-var CHUNK_MAX_BYTES = 900;
+var CHUNK_BYTES = 200;
+var HTTP_TIMEOUT_MS = 60000;
 
 var pendingChunks = [];
 var chunkIndex = 0;
+var chunkRetries = 0;
 
 Pebble.addEventListener('showConfiguration', function () {
   Pebble.openURL(clay.generateUrl());
@@ -47,57 +49,30 @@ function getConfig() {
   };
 }
 
-function utf8CharByteLength(code, nextCode) {
-  if (code < 0x80) {
-    return 1;
-  }
-  if (code < 0x800) {
-    return 2;
-  }
-  if (code >= 0xD800 && code < 0xDC00) {
-    if (nextCode >= 0xDC00 && nextCode < 0xE000) {
-      return 4;
-    }
-    return 3;
-  }
-  return 3;
+function utf8CodePointByteLength(codePoint) {
+  return unescape(encodeURIComponent(codePoint)).length;
 }
 
-function sliceUtf8ByMaxBytes(text, start, maxBytes) {
-  var byteCount = 0;
-  var index = start;
-
-  while (index < text.length) {
-    var code = text.charCodeAt(index);
-    var nextCode = index + 1 < text.length ? text.charCodeAt(index + 1) : 0;
-    var charBytes = utf8CharByteLength(code, nextCode);
-
-    if (byteCount + charBytes > maxBytes) {
-      break;
-    }
-
-    byteCount += charBytes;
-    index += (code >= 0xD800 && code < 0xDC00 && nextCode >= 0xDC00 && nextCode < 0xE000) ? 2 : 1;
-  }
-
-  return text.slice(start, index);
-}
-
-function buildReplyChunks(text) {
+function splitReplyIntoChunks(text) {
   var chunks = [];
-  var offset = 0;
+  var current = '';
+  var currentBytes = 0;
 
-  while (offset < text.length) {
-    var chunk = sliceUtf8ByMaxBytes(text, offset, CHUNK_MAX_BYTES);
-    if (!chunk.length) {
-      break;
+  for (var codePoint of text) {
+    var cpBytes = utf8CodePointByteLength(codePoint);
+
+    if (currentBytes > 0 && currentBytes + cpBytes > CHUNK_BYTES) {
+      chunks.push(current);
+      current = codePoint;
+      currentBytes = cpBytes;
+    } else {
+      current += codePoint;
+      currentBytes += cpBytes;
     }
-    chunks.push(chunk);
-    offset += chunk.length;
   }
 
-  if (!chunks.length) {
-    chunks.push('');
+  if (current.length > 0 || !chunks.length) {
+    chunks.push(current);
   }
 
   return chunks;
@@ -120,16 +95,23 @@ function sendNextChunk() {
 
   Pebble.sendAppMessage({ REPLY_CHUNK: pendingChunks[chunkIndex] }, function () {
     chunkIndex += 1;
+    chunkRetries = 0;
     sendNextChunk();
   }, function (err) {
     console.log('Failed to send REPLY_CHUNK: ' + JSON.stringify(err));
-    sendStatus('Erreur envoi réponse');
+    if (chunkRetries < 2) {
+      chunkRetries += 1;
+      sendNextChunk();
+      return;
+    }
+    sendStatus('Transfert interrompu');
   });
 }
 
 function sendReplyChunks(text) {
-  pendingChunks = buildReplyChunks(text);
+  pendingChunks = splitReplyIntoChunks(text);
   chunkIndex = 0;
+  chunkRetries = 0;
   sendNextChunk();
 }
 
@@ -165,13 +147,20 @@ function queryHermes(prompt, config) {
     sendStatus('Erreur HTTP ' + xhr.status);
   };
 
+  xhr.timeout = HTTP_TIMEOUT_MS;
+
+  xhr.ontimeout = function () {
+    sendStatus('Hermes injoignable');
+  };
+
   xhr.onerror = function () {
-    sendStatus('Réseau indisponible');
+    sendStatus('Hermes injoignable');
   };
 
   xhr.send(JSON.stringify({
     model: config.MODEL,
-    messages: [{ role: 'user', content: prompt }]
+    messages: [{ role: 'user', content: prompt }],
+    stream: false
   }));
 }
 
