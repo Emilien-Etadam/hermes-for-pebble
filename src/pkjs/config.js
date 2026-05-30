@@ -54,6 +54,24 @@ module.exports = [
     ]
   },
   {
+    type: 'section',
+    items: [
+      {
+        type: 'heading',
+        defaultValue: 'Pairing'
+      },
+      {
+        type: 'input',
+        messageKey: 'PAIRING_SERVER',
+        label: 'Serveur pairing',
+        defaultValue: '',
+        attributes: {
+          placeholder: 'IP:8642 (optionnel, défaut = URL Hermes)'
+        }
+      }
+    ]
+  },
+  {
     type: 'submit',
     defaultValue: 'Enregistrer'
   }

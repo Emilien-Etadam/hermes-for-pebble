@@ -9,10 +9,18 @@ var DEFAULT_MODEL = 'hermes';
 
 var CHUNK_BYTES = 200;
 var HTTP_TIMEOUT_MS = 60000;
+var PAIR_POLL_INTERVAL_MS = 2000;
+var PAIR_TIMEOUT_MS = 60000;
 
 var pendingChunks = [];
 var chunkIndex = 0;
 var chunkRetries = 0;
+
+var pairingActive = false;
+var pairingCode = null;
+var pairingPollTimer = null;
+var pairingTimeoutTimer = null;
+var pairingPollInFlight = false;
 
 Pebble.addEventListener('showConfiguration', function () {
   Pebble.openURL(clay.generateUrl());
@@ -45,8 +53,34 @@ function getConfig() {
     HERMES_URL: pickString(stored.HERMES_URL, DEFAULT_HERMES_URL),
     HERMES_KEY: pickString(stored.HERMES_KEY, DEFAULT_HERMES_KEY),
     SESSION_KEY: pickString(stored.SESSION_KEY, DEFAULT_SESSION_KEY),
-    MODEL: pickString(stored.MODEL, DEFAULT_MODEL)
+    MODEL: pickString(stored.MODEL, DEFAULT_MODEL),
+    PAIRING_SERVER: pickString(stored.PAIRING_SERVER, '')
   };
+}
+
+function getHermesUrlBase(url) {
+  var base = String(url).replace(/\/v1\/chat\/completions\/?$/, '');
+  return base.replace(/\/+$/, '');
+}
+
+function getPairingServerUrl(config) {
+  if (config.PAIRING_SERVER) {
+    var server = config.PAIRING_SERVER.replace(/\/+$/, '');
+    if (server.indexOf('://') === -1) {
+      server = 'http://' + server;
+    }
+    return server;
+  }
+  return getHermesUrlBase(config.HERMES_URL);
+}
+
+function generatePairCode() {
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  var code = '';
+  for (var i = 0; i < 4; i += 1) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
 }
 
 function utf8CodePointByteLength(codePoint) {
@@ -82,6 +116,127 @@ function sendStatus(message) {
   Pebble.sendAppMessage({ STATUS: message }, null, function (err) {
     console.log('Failed to send STATUS: ' + JSON.stringify(err));
   });
+}
+
+function sendPairCode(code) {
+  Pebble.sendAppMessage({ PAIR_CODE: code }, null, function (err) {
+    console.log('Failed to send PAIR_CODE: ' + JSON.stringify(err));
+    sendStatus('Erreur envoi code');
+  });
+}
+
+function savePairedConfig(config) {
+  var stored = {};
+  try {
+    stored = JSON.parse(localStorage.getItem('clay-settings')) || {};
+  } catch (err) {
+    stored = {};
+  }
+
+  if (config.url) {
+    stored.HERMES_URL = config.url;
+  }
+  if (config.key) {
+    stored.HERMES_KEY = config.key;
+  }
+  if (config.session_key) {
+    stored.SESSION_KEY = config.session_key;
+  }
+  if (config.model) {
+    stored.MODEL = config.model;
+  }
+
+  localStorage.setItem('clay-settings', JSON.stringify(stored));
+}
+
+function stopPairingPoll() {
+  pairingActive = false;
+  pairingCode = null;
+  pairingPollInFlight = false;
+
+  if (pairingPollTimer !== null) {
+    clearInterval(pairingPollTimer);
+    pairingPollTimer = null;
+  }
+
+  if (pairingTimeoutTimer !== null) {
+    clearTimeout(pairingTimeoutTimer);
+    pairingTimeoutTimer = null;
+  }
+}
+
+function pollPairingConfig() {
+  if (!pairingActive || !pairingCode || pairingPollInFlight) {
+    return;
+  }
+
+  var config = getConfig();
+  var baseUrl = getPairingServerUrl(config);
+  var pollUrl = baseUrl + '/pair/poll?code=' + encodeURIComponent(pairingCode);
+
+  pairingPollInFlight = true;
+
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', pollUrl, true);
+
+  xhr.onload = function () {
+    pairingPollInFlight = false;
+
+    if (!pairingActive) {
+      return;
+    }
+
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        var data = JSON.parse(xhr.responseText);
+        if (data.ok && data.config) {
+          stopPairingPoll();
+          savePairedConfig(data.config);
+          sendStatus('Connecté...');
+          sendStatus('Appairage réussi');
+          return;
+        }
+      } catch (err) {
+        console.log('Invalid pairing poll response: ' + err);
+      }
+    }
+
+    if (xhr.status >= 400) {
+      console.log('Pairing poll HTTP ' + xhr.status);
+    }
+  };
+
+  xhr.onerror = function () {
+    pairingPollInFlight = false;
+    console.log('Pairing poll network error');
+  };
+
+  xhr.ontimeout = function () {
+    pairingPollInFlight = false;
+    console.log('Pairing poll timeout');
+  };
+
+  xhr.timeout = HTTP_TIMEOUT_MS;
+  xhr.send();
+}
+
+function startPairing() {
+  stopPairingPoll();
+
+  pairingActive = true;
+  pairingCode = generatePairCode();
+  sendPairCode(pairingCode);
+
+  pairingPollTimer = setInterval(pollPairingConfig, PAIR_POLL_INTERVAL_MS);
+  pollPairingConfig();
+
+  pairingTimeoutTimer = setTimeout(function () {
+    if (!pairingActive) {
+      return;
+    }
+    stopPairingPoll();
+    sendStatus('Expiration');
+  }, PAIR_TIMEOUT_MS);
 }
 
 function sendNextChunk() {
@@ -166,7 +321,21 @@ function queryHermes(prompt, config) {
 
 Pebble.addEventListener('appmessage', function (e) {
   var payload = e.payload;
-  if (!payload || !payload.PROMPT) {
+  if (!payload) {
+    return;
+  }
+
+  if (payload.PAIRING_START) {
+    startPairing();
+    return;
+  }
+
+  if (payload.PAIRING_STOP) {
+    stopPairingPoll();
+    return;
+  }
+
+  if (!payload.PROMPT) {
     return;
   }
 

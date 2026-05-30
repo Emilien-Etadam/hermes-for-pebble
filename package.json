@@ -31,7 +31,10 @@
       "PROMPT",
       "REPLY_CHUNK",
       "REPLY_DONE",
-      "STATUS"
+      "STATUS",
+      "PAIR_CODE",
+      "PAIRING_START",
+      "PAIRING_STOP"
     ],
     "resources": {
       "media": []
