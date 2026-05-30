@@ -1,6 +1,7 @@
 #
 # Règles de compilation Pebble pour Hermes for Pebble.
 #
+import json
 import os.path
 
 top = '.'
@@ -13,6 +14,9 @@ def options(ctx):
 
 def configure(ctx):
     ctx.load('pebble_sdk')
+    with open('package.json', 'r') as f:
+        pkg = json.load(f)
+    ctx.env.BUNDLE_NAME = '{}.pbw'.format(pkg['name'])
 
 
 def build(ctx):
