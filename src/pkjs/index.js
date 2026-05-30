@@ -181,19 +181,4 @@ Pebble.addEventListener('appmessage', function (e) {
 
 Pebble.addEventListener('ready', function () {
   console.log('Hermes for Pebble ready');
-
-  // Auto-apply preset config (one-click setup from phone browser)
-  try {
-    var preset = JSON.parse(localStorage.getItem('__hermes_pebble_preset__') || 'null');
-    if (preset && preset.HERMES_URL && preset.HERMES_KEY) {
-      localStorage.setItem('clay-settings', JSON.stringify({
-        HERMES_URL: preset.HERMES_URL,
-        HERMES_KEY: preset.HERMES_KEY,
-        SESSION_KEY: preset.SESSION_KEY || 'pebble:emilien',
-        MODEL: preset.MODEL || 'hermes'
-      }));
-      localStorage.removeItem('__hermes_pebble_preset__');
-      console.log('Preset config applied');
-    }
-  } catch (e) { /* ignore */ }
 });
