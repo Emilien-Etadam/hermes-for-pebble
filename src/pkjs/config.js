@@ -52,13 +52,18 @@ module.exports = [
   {
     type: 'button',
     id: 'api-test',
+    defaultValue: 'Tester la connexion'
+  },
+  {
+    type: 'button',
+    id: 'model-test',
     primary: true,
-    defaultValue: 'Tester l’API'
+    defaultValue: 'Tester le modèle (prompt)'
   },
   {
     type: 'text',
     id: 'api-test-status',
-    defaultValue: 'Vérifie que le téléphone atteint le serveur Hermes.'
+    defaultValue: '<b>Connexion</b> : serveur + clé (GET /health, /v1/models).<br><b>Modèle</b> : envoie un vrai prompt chat depuis le téléphone.'
   },
   {
     type: 'submit',

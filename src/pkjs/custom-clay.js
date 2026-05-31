@@ -1,12 +1,22 @@
 module.exports = function() {
   var clayConfig = this;
   var HTTP_TIMEOUT_MS = 10000;
+  var CHAT_TEST_TIMEOUT_MS = 120000;
+  var TEST_PROMPT = 'Réponds en une courte phrase : test Pebble OK.';
 
   function pickString(value) {
     if (value === null || value === undefined) {
       return '';
     }
     return String(value).trim();
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
   function getStoredSettings() {
@@ -17,16 +27,19 @@ module.exports = function() {
     }
   }
 
-  function getServerUrl() {
-    var serverItem = clayConfig.getItemByMessageKey('HERMES_SERVER');
-    var server = pickString(serverItem ? serverItem.get() : '');
-    var stored = getStoredSettings();
-
-    if (!server) {
-      server = pickString(stored.HERMES_SERVER);
+  function getFieldValue(messageKey) {
+    var item = clayConfig.getItemByMessageKey(messageKey);
+    var value = pickString(item ? item.get() : '');
+    if (value) {
+      return value;
     }
+    return pickString(getStoredSettings()[messageKey]);
+  }
+
+  function getServerUrl() {
+    var server = getFieldValue('HERMES_SERVER');
     if (!server) {
-      server = pickString(stored.PAIRING_SERVER);
+      server = pickString(getStoredSettings().PAIRING_SERVER);
     }
 
     server = server.replace(/\/+$/, '');
@@ -40,14 +53,19 @@ module.exports = function() {
   }
 
   function getApiKey() {
-    var keyItem = clayConfig.getItemByMessageKey('HERMES_KEY');
-    var key = pickString(keyItem ? keyItem.get() : '');
-    var stored = getStoredSettings();
-
+    var key = getFieldValue('HERMES_KEY');
     if (key) {
       return key;
     }
-    return pickString(stored.HERMES_KEY) || pickString(stored.PAIRING_KEY);
+    return pickString(getStoredSettings().PAIRING_KEY);
+  }
+
+  function getModel() {
+    return getFieldValue('MODEL') || 'hermes';
+  }
+
+  function getSessionKey() {
+    return getFieldValue('SESSION_KEY') || 'pebble:default';
   }
 
   function setApiTestStatus(text) {
@@ -57,27 +75,104 @@ module.exports = function() {
     }
   }
 
+  function normalizeReplyContent(content) {
+    if (content === null || content === undefined) {
+      return '';
+    }
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      var parts = [];
+      for (var i = 0; i < content.length; i += 1) {
+        var part = content[i];
+        if (typeof part === 'string' && part) {
+          parts.push(part);
+        } else if (part && typeof part === 'object' && typeof part.text === 'string' && part.text) {
+          parts.push(part.text);
+        }
+      }
+      return parts.join('\n');
+    }
+    return String(content);
+  }
+
+  function extractReplyBody(responseText) {
+    if (!responseText) {
+      throw new Error('Réponse vide');
+    }
+    if (responseText.indexOf('data:') === 0) {
+      throw new Error('Stream non supporté');
+    }
+
+    var data = JSON.parse(responseText);
+    if (data.error) {
+      throw new Error(data.error.message || data.error.code || 'Erreur Hermes');
+    }
+    if (data.choices && data.choices.length > 0) {
+      if (data.choices[0].message) {
+        return normalizeReplyContent(data.choices[0].message.content);
+      }
+      if (typeof data.choices[0].text === 'string') {
+        return data.choices[0].text;
+      }
+    }
+    if (typeof data.output_text === 'string') {
+      return data.output_text;
+    }
+    throw new Error('Pas de texte dans la réponse');
+  }
+
+  function formatModelsMessage(responseText) {
+    try {
+      var data = JSON.parse(responseText);
+      if (!data.data || !data.data.length) {
+        return 'Serveur joignable';
+      }
+      var names = [];
+      for (var i = 0; i < data.data.length; i += 1) {
+        if (data.data[i].id) {
+          names.push(data.data[i].id);
+        }
+      }
+      if (!names.length) {
+        return 'Serveur joignable';
+      }
+      return 'Serveur joignable · modèles : ' + names.join(', ');
+    } catch (err) {
+      return 'Serveur joignable';
+    }
+  }
+
+  function setButtonDisabled(id, disabled) {
+    var btn = clayConfig.getItemById(id);
+    if (btn) {
+      if (disabled) {
+        btn.disable();
+      } else {
+        btn.enable();
+      }
+    }
+  }
+
   function testApiConnection() {
     var baseUrl = getServerUrl();
     var apiKey = getApiKey();
-    var testBtn = clayConfig.getItemById('api-test');
 
     if (!baseUrl) {
       setApiTestStatus('<span style="color:#c00">Serveur requis</span>');
       return;
     }
 
-    setApiTestStatus('Test en cours…');
-    if (testBtn) {
-      testBtn.disable();
-    }
+    setApiTestStatus('Test connectivité…');
+    setButtonDisabled('api-test', true);
+    setButtonDisabled('model-test', true);
 
     function finish(success, message) {
-      if (testBtn) {
-        testBtn.enable();
-      }
+      setButtonDisabled('api-test', false);
+      setButtonDisabled('model-test', false);
       var color = success ? '#080' : '#c00';
-      setApiTestStatus('<span style="color:' + color + '">' + message + '</span>');
+      setApiTestStatus('<span style="color:' + color + '">' + escapeHtml(message) + '</span>');
     }
 
     function tryModels() {
@@ -90,7 +185,7 @@ module.exports = function() {
 
       xhr.onload = function() {
         if (xhr.status >= 200 && xhr.status < 300) {
-          finish(true, 'API accessible');
+          finish(true, formatModelsMessage(xhr.responseText));
           return;
         }
         if (xhr.status === 401) {
@@ -118,7 +213,11 @@ module.exports = function() {
 
       xhr.onload = function() {
         if (xhr.status >= 200 && xhr.status < 300) {
-          finish(true, 'API accessible');
+          if (apiKey) {
+            tryModels();
+            return;
+          }
+          finish(true, 'Serveur joignable (sans test clé/modèle)');
           return;
         }
         if (apiKey) {
@@ -146,10 +245,100 @@ module.exports = function() {
     tryHealth();
   }
 
+  function testModelPrompt() {
+    var baseUrl = getServerUrl();
+    var apiKey = getApiKey();
+    var model = getModel();
+    var sessionKey = getSessionKey();
+
+    if (!baseUrl) {
+      setApiTestStatus('<span style="color:#c00">Serveur requis</span>');
+      return;
+    }
+    if (!apiKey) {
+      setApiTestStatus('<span style="color:#c00">Clé API requise</span>');
+      return;
+    }
+
+    setApiTestStatus('Test modèle « ' + escapeHtml(model) + ' »…');
+    setButtonDisabled('api-test', true);
+    setButtonDisabled('model-test', true);
+
+    function finish(success, message) {
+      setButtonDisabled('api-test', false);
+      setButtonDisabled('model-test', false);
+      var color = success ? '#080' : '#c00';
+      setApiTestStatus('<span style="color:' + color + '">' + message + '</span>');
+    }
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', baseUrl + '/v1/chat/completions', true);
+    xhr.timeout = CHAT_TEST_TIMEOUT_MS;
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('Authorization', 'Bearer ' + apiKey);
+    xhr.setRequestHeader('X-Hermes-Session-Key', sessionKey);
+
+    xhr.onload = function() {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          var reply = extractReplyBody(xhr.responseText);
+          if (!reply) {
+            finish(false, 'Modèle OK mais réponse vide');
+            return;
+          }
+          var preview = reply.replace(/\s+/g, ' ').substring(0, 160);
+          finish(
+            true,
+            'Modèle OK · ' + escapeHtml(preview) + (reply.length > 160 ? '…' : '')
+          );
+        } catch (err) {
+          finish(false, escapeHtml(err.message || 'Réponse invalide'));
+        }
+        return;
+      }
+
+      if (xhr.status === 401) {
+        finish(false, 'Clé API invalide');
+        return;
+      }
+
+      try {
+        var errData = JSON.parse(xhr.responseText);
+        if (errData.error && errData.error.message) {
+          finish(false, escapeHtml(String(errData.error.message).substring(0, 120)));
+          return;
+        }
+      } catch (parseErr) {
+        console.log('Model test error parse failed: ' + parseErr);
+      }
+
+      finish(false, 'Erreur HTTP ' + xhr.status);
+    };
+
+    xhr.onerror = function() {
+      finish(false, 'Serveur injoignable');
+    };
+
+    xhr.ontimeout = function() {
+      finish(false, 'Timeout (>2 min) — Hermes trop lent');
+    };
+
+    xhr.send(JSON.stringify({
+      model: model,
+      messages: [{ role: 'user', content: TEST_PROMPT }],
+      stream: false
+    }));
+  }
+
   clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
     var testBtn = clayConfig.getItemById('api-test');
     if (testBtn) {
       testBtn.on('click', testApiConnection);
+    }
+
+    var modelBtn = clayConfig.getItemById('model-test');
+    if (modelBtn) {
+      modelBtn.on('click', testModelPrompt);
     }
   });
 };
