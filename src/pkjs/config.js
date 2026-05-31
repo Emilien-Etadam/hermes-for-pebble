@@ -16,7 +16,7 @@ module.exports = [
       },
       {
         type: 'text',
-        defaultValue: '<ol><li>Indiquez l\'adresse du serveur Hermes (IP:8642).</li><li>Sur la montre : bouton <b>UP</b> pour lancer l\'appairage.</li><li>Notez le code à 4 caractères affiché.</li><li>Sur votre PC, CLI Hermes : <code>/pair CODE</code></li><li>Attendez « OK » sur la montre, puis SELECT.</li></ol>'
+        defaultValue: '<ol><li>Indiquez l\'adresse du serveur (IP:8642) ci-dessous → Enregistrer.</li><li>Montre : <b>UP</b> → notez le code (ex. ABCD).</li><li><b>Terminal PC</b> (pas le chat Hermes) :<br><code>API_SERVER_KEY=xxx ./scripts/pebble-pair.sh ABCD IP:8642</code><br>Clé = <code>API_SERVER_KEY</code> dans <code>~/.hermes/.env</code>.</li><li>Montre : « OK » → SELECT.</li></ol><p><b>/pair</b> n\'existe pas dans le chat Hermes.</p>'
       },
       {
         type: 'input',

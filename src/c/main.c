@@ -118,7 +118,7 @@ static void pairing_set_code(const char *code) {
 
   if (s_pair_code[0] != '\0') {
     char cli_hint[PAIR_HINT_MAX];
-    snprintf(cli_hint, sizeof(cli_hint), "CLI Hermes: /pair %s", s_pair_code);
+    snprintf(cli_hint, sizeof(cli_hint), "Terminal PC, pas chat");
     pairing_set_hint(cli_hint);
   }
 }
