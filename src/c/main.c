@@ -382,6 +382,31 @@ static void outbox_failed_callback(DictionaryIterator *iter, AppMessageResult re
   set_status("Envoi impossible");
 }
 
+static void scroll_by(int delta_y) {
+  if (s_scroll_layer == NULL) {
+    return;
+  }
+
+  GSize content_size = scroll_layer_get_content_size(s_scroll_layer);
+  const int viewport_h = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.h;
+
+  if (content_size.h <= viewport_h) {
+    return;
+  }
+
+  GPoint offset = scroll_layer_get_content_offset(s_scroll_layer);
+  const int max_y = content_size.h - viewport_h;
+  int new_y = offset.y + delta_y;
+
+  if (new_y < 0) {
+    new_y = 0;
+  } else if (new_y > max_y) {
+    new_y = max_y;
+  }
+
+  scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, new_y), true);
+}
+
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
 #if defined(PBL_MICROPHONE)
   if (s_dictation_session == NULL) {
@@ -402,12 +427,34 @@ static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (s_in_pairing_mode) {
     return;
   }
+
+  if (s_scroll_layer != NULL) {
+    GSize content_size = scroll_layer_get_content_size(s_scroll_layer);
+    const int viewport_h = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.h;
+    GPoint offset = scroll_layer_get_content_offset(s_scroll_layer);
+
+    if (content_size.h > viewport_h && offset.y > 0) {
+      scroll_by(-(viewport_h / 2));
+      return;
+    }
+  }
+
   pairing_enter();
+}
+
+static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_scroll_layer == NULL) {
+    return;
+  }
+
+  const int viewport_h = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.h;
+  scroll_by(viewport_h / 2);
 }
 
 static void click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
 
 static void pairing_select_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -486,7 +533,6 @@ static void window_load(Window *window) {
   layer_add_child(window_layer, text_layer_get_layer(s_status_layer));
 
   s_scroll_layer = scroll_layer_create(GRect(0, STATUS_HEIGHT, bounds.size.w, bounds.size.h - STATUS_HEIGHT));
-  scroll_layer_set_click_config_onto_window(s_scroll_layer, window);
 
   s_reply_layer = text_layer_create(GRect(0, 0, bounds.size.w, bounds.size.h - STATUS_HEIGHT));
   text_layer_set_font(s_reply_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
