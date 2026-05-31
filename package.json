@@ -1,7 +1,7 @@
 {
   "name": "hermes-for-pebble",
   "author": "Hermes",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "keywords": [
     "pebble-app"
   ],
@@ -31,10 +31,7 @@
       "PROMPT",
       "REPLY_CHUNK",
       "REPLY_DONE",
-      "STATUS",
-      "PAIR_CODE",
-      "PAIRING_START",
-      "PAIRING_STOP"
+      "STATUS"
     ],
     "resources": {
       "media": []
