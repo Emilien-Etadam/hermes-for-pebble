@@ -5,26 +5,28 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: 'Configurez l\'app via l\'appairage automatique. L\'URL, la clé et la session sont enregistrées sur le téléphone après un appairage réussi — elles ne s\'affichent pas ici.'
+    defaultValue: '<b>Première fois :</b> serveur + clé API ci-dessous → Enregistrer.<br><b>Ensuite :</b> bouton <b>UP</b> sur la montre = appairage automatique (plus de terminal).'
   },
   {
     type: 'section',
     items: [
       {
-        type: 'heading',
-        defaultValue: 'Appairage'
-      },
-      {
-        type: 'text',
-        defaultValue: '<ol><li>Indiquez l\'adresse du serveur (IP:8642) ci-dessous → Enregistrer.</li><li>Montre : <b>UP</b> → notez le code (ex. ABCD).</li><li><b>Terminal PC</b> (pas le chat Hermes) :<br><code>API_SERVER_KEY=xxx ./scripts/pebble-pair.sh ABCD IP:8642</code><br>Clé = <code>API_SERVER_KEY</code> dans <code>~/.hermes/.env</code>.</li><li>Montre : « OK » → SELECT.</li></ol><p><b>/pair</b> n\'existe pas dans le chat Hermes.</p>'
+        type: 'input',
+        messageKey: 'PAIRING_SERVER',
+        label: 'Serveur Hermes',
+        defaultValue: '',
+        attributes: {
+          placeholder: '192.168.1.10:8642'
+        }
       },
       {
         type: 'input',
-        messageKey: 'PAIRING_SERVER',
-        label: 'Serveur Hermes (IP:port)',
+        messageKey: 'PAIRING_KEY',
+        label: 'Clé API serveur',
         defaultValue: '',
         attributes: {
-          placeholder: 'IP:8642'
+          type: 'password',
+          placeholder: 'API_SERVER_KEY (~/.hermes/.env)'
         }
       }
     ]
