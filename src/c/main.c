@@ -93,6 +93,8 @@ static void reply_finalize(void) {
   scroll_layer_set_content_size(s_scroll_layer, content_size);
   scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, 0), false);
 
+  set_status("SELECT parler");
+
   free(previous_display);
 }
 

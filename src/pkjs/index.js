@@ -66,7 +66,9 @@ function migrateLegacySettings(stored) {
 
 function getConfig() {
   var stored = getStoredSettings();
-  migrateLegacySettings(stored);
+  if (migrateLegacySettings(stored)) {
+    saveStoredSettings(stored);
+  }
 
   return {
     HERMES_SERVER: pickString(stored.HERMES_SERVER),
@@ -127,11 +129,23 @@ function utf8CodePointByteLength(codePoint) {
 }
 
 function splitReplyIntoChunks(text) {
+  text = String(text || '');
   var chunks = [];
   var current = '';
   var currentBytes = 0;
+  var i = 0;
 
-  for (var codePoint of text) {
+  while (i < text.length) {
+    var codePoint = text.charAt(i);
+
+    if (text.charCodeAt(i) >= 0xD800 && text.charCodeAt(i) <= 0xDBFF && i + 1 < text.length) {
+      var next = text.charCodeAt(i + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) {
+        codePoint = text.charAt(i) + text.charAt(i + 1);
+        i += 1;
+      }
+    }
+
     var cpBytes = utf8CodePointByteLength(codePoint);
 
     if (currentBytes > 0 && currentBytes + cpBytes > CHUNK_BYTES) {
@@ -142,6 +156,8 @@ function splitReplyIntoChunks(text) {
       current += codePoint;
       currentBytes += cpBytes;
     }
+
+    i += 1;
   }
 
   if (current.length > 0 || !chunks.length) {
@@ -149,6 +165,68 @@ function splitReplyIntoChunks(text) {
   }
 
   return chunks;
+}
+
+function normalizeReplyContent(content) {
+  if (content === null || content === undefined) {
+    return '';
+  }
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    var parts = [];
+    for (var i = 0; i < content.length; i += 1) {
+      var part = content[i];
+      if (typeof part === 'string' && part) {
+        parts.push(part);
+      } else if (part && typeof part === 'object') {
+        if (typeof part.text === 'string' && part.text) {
+          parts.push(part.text);
+        } else if (part.type === 'text' && typeof part.content === 'string') {
+          parts.push(part.content);
+        }
+      }
+    }
+    return parts.join('\n');
+  }
+
+  return String(content);
+}
+
+function extractReplyBody(responseText) {
+  if (!responseText) {
+    throw new Error('Réponse vide');
+  }
+
+  if (responseText.indexOf('data:') === 0) {
+    throw new Error('Stream non supporté');
+  }
+
+  var data = JSON.parse(responseText);
+
+  if (data.error) {
+    var errorMessage = data.error.message || data.error.code || 'Erreur Hermes';
+    throw new Error(errorMessage);
+  }
+
+  if (data.choices && data.choices.length > 0) {
+    var choice = data.choices[0];
+    if (choice.message) {
+      return normalizeReplyContent(choice.message.content);
+    }
+    if (typeof choice.text === 'string') {
+      return choice.text;
+    }
+  }
+
+  if (typeof data.output_text === 'string') {
+    return data.output_text;
+  }
+
+  throw new Error('Missing reply content');
 }
 
 function sendStatus(message) {
@@ -159,7 +237,9 @@ function sendStatus(message) {
 
 function sendNextChunk() {
   if (chunkIndex >= pendingChunks.length) {
-    Pebble.sendAppMessage({ REPLY_DONE: 1 }, null, function (err) {
+    Pebble.sendAppMessage({ REPLY_DONE: 1 }, function () {
+      sendStatus('SELECT parler');
+    }, function (err) {
       console.log('Failed to send REPLY_DONE: ' + JSON.stringify(err));
       sendStatus('Erreur envoi réponse');
     });
@@ -182,21 +262,29 @@ function sendNextChunk() {
 }
 
 function sendReplyChunks(text) {
-  pendingChunks = splitReplyIntoChunks(text);
+  var reply = String(text || '');
+  if (!reply.length) {
+    sendStatus('Réponse vide');
+    return;
+  }
+
+  pendingChunks = splitReplyIntoChunks(reply);
   chunkIndex = 0;
   chunkRetries = 0;
+  sendStatus('Transfert...');
   sendNextChunk();
 }
 
-function extractReplyBody(responseText) {
-  var data = JSON.parse(responseText);
-  if (data.choices && data.choices.length > 0 && data.choices[0].message) {
-    return data.choices[0].message.content || '';
+function formatHttpError(responseText, status) {
+  try {
+    var data = JSON.parse(responseText);
+    if (data.error && data.error.message) {
+      return String(data.error.message).substring(0, 48);
+    }
+  } catch (err) {
+    console.log('HTTP error body parse failed: ' + err);
   }
-  if (typeof data.output_text === 'string') {
-    return data.output_text;
-  }
-  throw new Error('Missing reply content');
+  return 'Erreur HTTP ' + status;
 }
 
 function queryHermes(prompt, config) {
@@ -212,12 +300,15 @@ function queryHermes(prompt, config) {
   xhr.setRequestHeader('X-Hermes-Session-Key', request.sessionKey);
 
   xhr.onload = function () {
+    console.log('Hermes HTTP ' + xhr.status + ' bytes=' + (xhr.responseText ? xhr.responseText.length : 0));
+
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
         sendReplyChunks(extractReplyBody(xhr.responseText));
       } catch (err) {
         console.log('Invalid Hermes response: ' + err);
-        sendStatus('Réponse invalide');
+        var message = err && err.message ? String(err.message) : 'Réponse invalide';
+        sendStatus(message.substring(0, 48));
       }
       return;
     }
@@ -227,7 +318,7 @@ function queryHermes(prompt, config) {
       return;
     }
 
-    sendStatus('Erreur HTTP ' + xhr.status);
+    sendStatus(formatHttpError(xhr.responseText, xhr.status));
   };
 
   xhr.timeout = CHAT_TIMEOUT_MS;
