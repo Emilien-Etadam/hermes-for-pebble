@@ -21,8 +21,10 @@ static Window *s_window;
 static TextLayer *s_status_layer;
 static ScrollLayer *s_scroll_layer;
 static TextLayer *s_reply_layer;
+static ActionBarLayer *s_action_bar;
 
 static Window *s_pairing_window;
+static ActionBarLayer *s_pairing_action_bar;
 static TextLayer *s_pairing_title_layer;
 static TextLayer *s_pairing_code_layer;
 static TextLayer *s_pairing_state_layer;
@@ -451,12 +453,6 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
   scroll_by(viewport_h / 2);
 }
 
-static void click_config_provider(void *context) {
-  window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
-  window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
-  window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
-}
-
 static void pairing_select_click_handler(ClickRecognizerRef recognizer, void *context) {
   pairing_exit();
 }
@@ -465,9 +461,27 @@ static void pairing_back_click_handler(ClickRecognizerRef recognizer, void *cont
   pairing_exit();
 }
 
+static void main_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
+  window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
+}
+
 static void pairing_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_SELECT, pairing_select_click_handler);
   window_single_click_subscribe(BUTTON_ID_BACK, pairing_back_click_handler);
+}
+
+static void window_appear(Window *window) {
+  if (s_action_bar != NULL) {
+    action_bar_layer_set_click_config_provider(s_action_bar, main_click_config_provider);
+  }
+}
+
+static void pairing_window_appear(Window *window) {
+  if (s_pairing_action_bar != NULL) {
+    action_bar_layer_set_click_config_provider(s_pairing_action_bar, pairing_click_config_provider);
+  }
 }
 
 static void pairing_window_load(Window *window) {
@@ -508,9 +522,20 @@ static void pairing_window_load(Window *window) {
 
   pairing_update_code_display();
   pairing_update_hint_display();
+
+  s_pairing_action_bar = action_bar_layer_create();
+  action_bar_layer_add_to_window(s_pairing_action_bar, window);
+  action_bar_layer_set_click_config_provider(s_pairing_action_bar, pairing_click_config_provider);
+  action_bar_layer_set_background_color(s_pairing_action_bar, GColorBlack);
 }
 
 static void pairing_window_unload(Window *window) {
+  if (s_pairing_action_bar != NULL) {
+    action_bar_layer_remove_from_window(s_pairing_action_bar);
+    action_bar_layer_destroy(s_pairing_action_bar);
+    s_pairing_action_bar = NULL;
+  }
+
   text_layer_destroy(s_pairing_hint_layer);
   s_pairing_hint_layer = NULL;
   text_layer_destroy(s_pairing_state_layer);
@@ -524,6 +549,7 @@ static void pairing_window_unload(Window *window) {
 static void window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
+  const int16_t content_w = bounds.size.w - ACTION_BAR_WIDTH;
 
   s_status_layer = text_layer_create(GRect(0, 0, bounds.size.w, STATUS_HEIGHT));
   text_layer_set_font(s_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
@@ -532,14 +558,20 @@ static void window_load(Window *window) {
   text_layer_set_text_color(s_status_layer, GColorWhite);
   layer_add_child(window_layer, text_layer_get_layer(s_status_layer));
 
-  s_scroll_layer = scroll_layer_create(GRect(0, STATUS_HEIGHT, bounds.size.w, bounds.size.h - STATUS_HEIGHT));
+  s_scroll_layer = scroll_layer_create(GRect(0, STATUS_HEIGHT, content_w, bounds.size.h - STATUS_HEIGHT));
 
-  s_reply_layer = text_layer_create(GRect(0, 0, bounds.size.w, bounds.size.h - STATUS_HEIGHT));
+  s_reply_layer = text_layer_create(GRect(0, 0, content_w, bounds.size.h - STATUS_HEIGHT));
   text_layer_set_font(s_reply_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
   text_layer_set_overflow_mode(s_reply_layer, GTextOverflowModeWordWrap);
   text_layer_set_background_color(s_reply_layer, GColorClear);
   text_layer_set_text_color(s_reply_layer, GColorWhite);
   scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_reply_layer));
+  layer_add_child(window_layer, scroll_layer_get_layer(s_scroll_layer));
+
+  s_action_bar = action_bar_layer_create();
+  action_bar_layer_add_to_window(s_action_bar, window);
+  action_bar_layer_set_click_config_provider(s_action_bar, main_click_config_provider);
+  action_bar_layer_set_background_color(s_action_bar, GColorBlack);
 
 #if defined(PBL_MICROPHONE)
   set_status("SELECT parler · UP appairer");
@@ -549,6 +581,12 @@ static void window_load(Window *window) {
 }
 
 static void window_unload(Window *window) {
+  if (s_action_bar != NULL) {
+    action_bar_layer_remove_from_window(s_action_bar);
+    action_bar_layer_destroy(s_action_bar);
+    s_action_bar = NULL;
+  }
+
   text_layer_set_text(s_reply_layer, "");
   text_layer_destroy(s_reply_layer);
   scroll_layer_destroy(s_scroll_layer);
@@ -560,17 +598,17 @@ static void window_unload(Window *window) {
 
 static void init(void) {
   s_window = window_create();
-  window_set_click_config_provider(s_window, click_config_provider);
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load = window_load,
     .unload = window_unload,
+    .appear = window_appear,
   });
 
   s_pairing_window = window_create();
-  window_set_click_config_provider(s_pairing_window, pairing_click_config_provider);
   window_set_window_handlers(s_pairing_window, (WindowHandlers) {
     .load = pairing_window_load,
     .unload = pairing_window_unload,
+    .appear = pairing_window_appear,
   });
 
   window_stack_push(s_window, true);
