@@ -8,6 +8,7 @@
 #define STATUS_TEXT_MAX 128
 #define TRANSCRIPT_MAX 512
 #define PAIR_CODE_LEN 5
+#define PAIR_HINT_MAX 48
 
 typedef enum {
   PairingStateWaiting = 0,
@@ -25,9 +26,11 @@ static Window *s_pairing_window;
 static TextLayer *s_pairing_title_layer;
 static TextLayer *s_pairing_code_layer;
 static TextLayer *s_pairing_state_layer;
+static TextLayer *s_pairing_hint_layer;
 
 static char s_status_text[STATUS_TEXT_MAX];
 static char s_pair_code[PAIR_CODE_LEN];
+static char s_pair_hint[PAIR_HINT_MAX];
 static bool s_in_pairing_mode = false;
 static PairingState s_pairing_state = PairingStateWaiting;
 
@@ -86,6 +89,22 @@ static void pairing_update_code_display(void) {
   }
 }
 
+static void pairing_update_hint_display(void) {
+  if (s_pairing_hint_layer != NULL) {
+    text_layer_set_text(s_pairing_hint_layer, s_pair_hint);
+  }
+}
+
+static void pairing_set_hint(const char *hint) {
+  if (hint == NULL) {
+    s_pair_hint[0] = '\0';
+  } else {
+    strncpy(s_pair_hint, hint, sizeof(s_pair_hint) - 1);
+    s_pair_hint[sizeof(s_pair_hint) - 1] = '\0';
+  }
+  pairing_update_hint_display();
+}
+
 static void pairing_set_code(const char *code) {
   if (code == NULL) {
     s_pair_code[0] = '\0';
@@ -94,6 +113,12 @@ static void pairing_set_code(const char *code) {
     s_pair_code[sizeof(s_pair_code) - 1] = '\0';
   }
   pairing_update_code_display();
+
+  if (s_pair_code[0] != '\0') {
+    char cli_hint[PAIR_HINT_MAX];
+    snprintf(cli_hint, sizeof(cli_hint), "CLI Hermes: /pair %s", s_pair_code);
+    pairing_set_hint(cli_hint);
+  }
 }
 
 static void send_pairing_message(uint32_t key) {
@@ -127,7 +152,9 @@ static void send_pairing_stop(void) {
 static void pairing_exit(void) {
   send_pairing_stop();
   s_in_pairing_mode = false;
-  pairing_set_code(NULL);
+  s_pair_code[0] = '\0';
+  pairing_update_code_display();
+  pairing_set_hint("");
   pairing_update_state(PairingStateWaiting);
 
   if (s_pairing_window != NULL && window_stack_contains_window(s_pairing_window)) {
@@ -152,12 +179,20 @@ static void pairing_handle_status(const char *status) {
 
   if (strcmp(status, "Expiration") == 0) {
     pairing_update_state(PairingStateExpired);
+    return;
+  }
+
+  if (strcmp(status, "Serveur requis (Settings)") == 0) {
+    pairing_update_state(PairingStateWaiting);
+    pairing_set_hint("Settings: IP serveur");
   }
 }
 
 static void pairing_enter(void) {
   s_in_pairing_mode = true;
-  pairing_set_code(NULL);
+  s_pair_code[0] = '\0';
+  pairing_update_code_display();
+  pairing_set_hint("Generation du code...");
   pairing_update_state(PairingStateWaiting);
   send_pairing_start();
 
@@ -397,10 +432,10 @@ static void pairing_window_load(Window *window) {
   text_layer_set_text_alignment(s_pairing_title_layer, GTextAlignmentCenter);
   text_layer_set_background_color(s_pairing_title_layer, GColorBlack);
   text_layer_set_text_color(s_pairing_title_layer, GColorWhite);
-  text_layer_set_text(s_pairing_title_layer, "Pairing");
+  text_layer_set_text(s_pairing_title_layer, "Appairage");
   layer_add_child(window_layer, text_layer_get_layer(s_pairing_title_layer));
 
-  s_pairing_code_layer = text_layer_create(GRect(0, 70, bounds.size.w, 48));
+  s_pairing_code_layer = text_layer_create(GRect(0, 58, bounds.size.w, 48));
   text_layer_set_font(s_pairing_code_layer, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD));
   text_layer_set_text_alignment(s_pairing_code_layer, GTextAlignmentCenter);
   text_layer_set_background_color(s_pairing_code_layer, GColorBlack);
@@ -408,7 +443,7 @@ static void pairing_window_load(Window *window) {
   text_layer_set_text(s_pairing_code_layer, "----");
   layer_add_child(window_layer, text_layer_get_layer(s_pairing_code_layer));
 
-  s_pairing_state_layer = text_layer_create(GRect(0, 130, bounds.size.w, 28));
+  s_pairing_state_layer = text_layer_create(GRect(0, 112, bounds.size.w, 24));
   text_layer_set_font(s_pairing_state_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
   text_layer_set_text_alignment(s_pairing_state_layer, GTextAlignmentCenter);
   text_layer_set_background_color(s_pairing_state_layer, GColorBlack);
@@ -416,10 +451,21 @@ static void pairing_window_load(Window *window) {
   text_layer_set_text(s_pairing_state_layer, pairing_state_text(s_pairing_state));
   layer_add_child(window_layer, text_layer_get_layer(s_pairing_state_layer));
 
+  s_pairing_hint_layer = text_layer_create(GRect(0, 140, bounds.size.w, 36));
+  text_layer_set_font(s_pairing_hint_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+  text_layer_set_text_alignment(s_pairing_hint_layer, GTextAlignmentCenter);
+  text_layer_set_background_color(s_pairing_hint_layer, GColorBlack);
+  text_layer_set_text_color(s_pairing_hint_layer, GColorWhite);
+  text_layer_set_text(s_pairing_hint_layer, s_pair_hint);
+  layer_add_child(window_layer, text_layer_get_layer(s_pairing_hint_layer));
+
   pairing_update_code_display();
+  pairing_update_hint_display();
 }
 
 static void pairing_window_unload(Window *window) {
+  text_layer_destroy(s_pairing_hint_layer);
+  s_pairing_hint_layer = NULL;
   text_layer_destroy(s_pairing_state_layer);
   s_pairing_state_layer = NULL;
   text_layer_destroy(s_pairing_code_layer);
@@ -450,7 +496,7 @@ static void window_load(Window *window) {
   scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_reply_layer));
 
 #if defined(PBL_MICROPHONE)
-  set_status("Appuyez pour parler");
+  set_status("SELECT parler · UP appairer");
 #else
   set_status("Micro indisponible");
 #endif

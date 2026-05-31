@@ -2,11 +2,6 @@ var Clay = require('pebble-clay');
 var clayConfig = require('./config');
 var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
 
-var DEFAULT_HERMES_URL = 'http://192.168.30.140:8642/v1/chat/completions';
-var DEFAULT_HERMES_KEY = '698e3bbc841346e098bc46b69d43f7b7';
-var DEFAULT_SESSION_KEY = 'pebble:emilien';
-var DEFAULT_MODEL = 'hermes';
-
 var CHUNK_BYTES = 200;
 var HTTP_TIMEOUT_MS = 60000;
 var PAIR_POLL_INTERVAL_MS = 2000;
@@ -33,12 +28,11 @@ Pebble.addEventListener('webviewclosed', function (e) {
   clay.getSettings(e.response);
 });
 
-function pickString(value, fallback) {
+function pickString(value) {
   if (value === null || value === undefined) {
-    return fallback;
+    return '';
   }
-  var text = String(value).trim();
-  return text.length > 0 ? text : fallback;
+  return String(value).trim();
 }
 
 function getConfig() {
@@ -50,15 +44,22 @@ function getConfig() {
   }
 
   return {
-    HERMES_URL: pickString(stored.HERMES_URL, DEFAULT_HERMES_URL),
-    HERMES_KEY: pickString(stored.HERMES_KEY, DEFAULT_HERMES_KEY),
-    SESSION_KEY: pickString(stored.SESSION_KEY, DEFAULT_SESSION_KEY),
-    MODEL: pickString(stored.MODEL, DEFAULT_MODEL),
-    PAIRING_SERVER: pickString(stored.PAIRING_SERVER, '')
+    HERMES_URL: pickString(stored.HERMES_URL),
+    HERMES_KEY: pickString(stored.HERMES_KEY),
+    SESSION_KEY: pickString(stored.SESSION_KEY),
+    MODEL: pickString(stored.MODEL),
+    PAIRING_SERVER: pickString(stored.PAIRING_SERVER)
   };
 }
 
+function isConfigured(config) {
+  return config.HERMES_URL.length > 0 && config.HERMES_KEY.length > 0;
+}
+
 function getHermesUrlBase(url) {
+  if (!url) {
+    return '';
+  }
   var base = String(url).replace(/\/v1\/chat\/completions\/?$/, '');
   return base.replace(/\/+$/, '');
 }
@@ -223,6 +224,13 @@ function pollPairingConfig() {
 function startPairing() {
   stopPairingPoll();
 
+  var config = getConfig();
+  var baseUrl = getPairingServerUrl(config);
+  if (!baseUrl) {
+    sendStatus('Serveur requis (Settings)');
+    return;
+  }
+
   pairingActive = true;
   pairingCode = generatePairCode();
   sendPairCode(pairingCode);
@@ -340,8 +348,8 @@ Pebble.addEventListener('appmessage', function (e) {
   }
 
   var config = getConfig();
-  if (!config.HERMES_URL || !config.HERMES_KEY) {
-    sendStatus('Config manquante');
+  if (!isConfigured(config)) {
+    sendStatus('Non configuré · UP appairer');
     return;
   }
 
