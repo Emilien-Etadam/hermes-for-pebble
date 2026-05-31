@@ -5,6 +5,9 @@ var clay = new Clay(clayConfig, customClay, { autoHandleEvents: false });
 
 var CHUNK_BYTES = 200;
 var CHAT_TIMEOUT_MS = 180000;
+var MODEL_TEST_TIMEOUT_MS = 120000;
+var MODEL_TEST_KEY = 'hermes-model-test';
+var MODEL_TEST_PROMPT = 'Réponds en une courte phrase : test Pebble OK.';
 var DEFAULT_MODEL = 'hermes';
 var DEFAULT_SESSION_KEY = 'pebble:default';
 var CHAT_COMPLETIONS_PATH = '/v1/chat/completions';
@@ -12,6 +15,7 @@ var CHAT_COMPLETIONS_PATH = '/v1/chat/completions';
 var pendingChunks = [];
 var chunkIndex = 0;
 var chunkRetries = 0;
+var modelTestInFlight = false;
 
 Pebble.addEventListener('showConfiguration', function () {
   Pebble.openURL(clay.generateUrl());
@@ -287,6 +291,101 @@ function formatHttpError(responseText, status) {
   return 'Erreur HTTP ' + status;
 }
 
+function readModelTestState() {
+  try {
+    return JSON.parse(localStorage.getItem(MODEL_TEST_KEY));
+  } catch (err) {
+    return null;
+  }
+}
+
+function writeModelTestState(state) {
+  localStorage.setItem(MODEL_TEST_KEY, JSON.stringify(state));
+}
+
+function finishModelTest(success, message) {
+  writeModelTestState({
+    status: 'done',
+    success: success,
+    message: message,
+    finishedAt: Date.now()
+  });
+  modelTestInFlight = false;
+}
+
+function runPendingModelTest() {
+  if (modelTestInFlight) {
+    return;
+  }
+
+  var state = readModelTestState();
+  if (!state || state.status !== 'pending') {
+    return;
+  }
+
+  var config = getConfig();
+  if (!isConfigured(config)) {
+    finishModelTest(false, 'Settings incomplets');
+    return;
+  }
+
+  modelTestInFlight = true;
+  writeModelTestState({
+    status: 'running',
+    requestedAt: state.requestedAt
+  });
+
+  var request = resolveHermesRequest(config);
+  var xhr = new XMLHttpRequest();
+
+  console.log('Model test POST ' + request.url + ' model=' + request.model);
+
+  xhr.open('POST', request.url, true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.setRequestHeader('Authorization', 'Bearer ' + request.key);
+  xhr.setRequestHeader('X-Hermes-Session-Key', request.sessionKey);
+  xhr.timeout = MODEL_TEST_TIMEOUT_MS;
+
+  xhr.onload = function () {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        var reply = extractReplyBody(xhr.responseText);
+        if (!reply) {
+          finishModelTest(false, 'Modèle OK mais réponse vide');
+          return;
+        }
+        var preview = String(reply).replace(/\s+/g, ' ').substring(0, 120);
+        finishModelTest(true, 'Modèle OK · ' + preview + (reply.length > 120 ? '…' : ''));
+      } catch (err) {
+        var message = err && err.message ? String(err.message) : 'Réponse invalide';
+        finishModelTest(false, message.substring(0, 120));
+      }
+      return;
+    }
+
+    if (xhr.status === 401) {
+      finishModelTest(false, 'Clé API invalide');
+      return;
+    }
+
+    finishModelTest(false, formatHttpError(xhr.responseText, xhr.status));
+  };
+
+  xhr.onerror = function () {
+    finishModelTest(false, 'Hermes injoignable');
+  };
+
+  xhr.ontimeout = function () {
+    finishModelTest(false, 'Timeout (>2 min)');
+  };
+
+  xhr.send(JSON.stringify({
+    model: request.model,
+    messages: [{ role: 'user', content: MODEL_TEST_PROMPT }],
+    stream: false
+  }));
+}
+
 function queryHermes(prompt, config) {
   var request = resolveHermesRequest(config);
   var xhr = new XMLHttpRequest();
@@ -355,5 +454,6 @@ Pebble.addEventListener('appmessage', function (e) {
 
 Pebble.addEventListener('ready', function () {
   ensureConfigDefaults();
+  setInterval(runPendingModelTest, 500);
   console.log('Hermes for Pebble ready');
 });

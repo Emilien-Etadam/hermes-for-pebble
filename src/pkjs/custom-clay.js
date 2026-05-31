@@ -1,8 +1,9 @@
 module.exports = function() {
   var clayConfig = this;
   var HTTP_TIMEOUT_MS = 10000;
-  var CHAT_TEST_TIMEOUT_MS = 120000;
-  var TEST_PROMPT = 'Réponds en une courte phrase : test Pebble OK.';
+  var MODEL_TEST_KEY = 'hermes-model-test';
+  var MODEL_TEST_POLL_MS = 500;
+  var MODEL_TEST_WAIT_MS = 130000;
 
   function pickString(value) {
     if (value === null || value === undefined) {
@@ -36,6 +37,29 @@ module.exports = function() {
     return pickString(getStoredSettings()[messageKey]);
   }
 
+  function snapshotFormToStorage() {
+    var stored = getStoredSettings();
+    var server = getFieldValue('HERMES_SERVER');
+    var key = getFieldValue('HERMES_KEY');
+    var model = getFieldValue('MODEL');
+    var session = getFieldValue('SESSION_KEY');
+
+    if (server) {
+      stored.HERMES_SERVER = server;
+    }
+    if (key) {
+      stored.HERMES_KEY = key;
+    }
+    if (model) {
+      stored.MODEL = model;
+    }
+    if (session) {
+      stored.SESSION_KEY = session;
+    }
+
+    localStorage.setItem('clay-settings', JSON.stringify(stored));
+  }
+
   function getServerUrl() {
     var server = getFieldValue('HERMES_SERVER');
     if (!server) {
@@ -60,14 +84,6 @@ module.exports = function() {
     return pickString(getStoredSettings().PAIRING_KEY);
   }
 
-  function getModel() {
-    return getFieldValue('MODEL') || 'hermes';
-  }
-
-  function getSessionKey() {
-    return getFieldValue('SESSION_KEY') || 'pebble:default';
-  }
-
   function setApiTestStatus(text) {
     var statusItem = clayConfig.getItemById('api-test-status');
     if (statusItem) {
@@ -75,69 +91,50 @@ module.exports = function() {
     }
   }
 
-  function normalizeReplyContent(content) {
-    if (content === null || content === undefined) {
-      return '';
-    }
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      var parts = [];
-      for (var i = 0; i < content.length; i += 1) {
-        var part = content[i];
-        if (typeof part === 'string' && part) {
-          parts.push(part);
-        } else if (part && typeof part === 'object' && typeof part.text === 'string' && part.text) {
-          parts.push(part.text);
-        }
+  function applyFirstModelFromResponse(responseText) {
+    try {
+      var data = JSON.parse(responseText);
+      if (!data.data || !data.data.length || !data.data[0].id) {
+        return null;
       }
-      return parts.join('\n');
+
+      var modelId = pickString(data.data[0].id);
+      var modelItem = clayConfig.getItemByMessageKey('MODEL');
+      if (modelItem) {
+        modelItem.set(modelId);
+      }
+
+      var stored = getStoredSettings();
+      stored.MODEL = modelId;
+      localStorage.setItem('clay-settings', JSON.stringify(stored));
+      return modelId;
+    } catch (err) {
+      return null;
     }
-    return String(content);
   }
 
-  function extractReplyBody(responseText) {
-    if (!responseText) {
-      throw new Error('Réponse vide');
-    }
-    if (responseText.indexOf('data:') === 0) {
-      throw new Error('Stream non supporté');
-    }
-
-    var data = JSON.parse(responseText);
-    if (data.error) {
-      throw new Error(data.error.message || data.error.code || 'Erreur Hermes');
-    }
-    if (data.choices && data.choices.length > 0) {
-      if (data.choices[0].message) {
-        return normalizeReplyContent(data.choices[0].message.content);
-      }
-      if (typeof data.choices[0].text === 'string') {
-        return data.choices[0].text;
-      }
-    }
-    if (typeof data.output_text === 'string') {
-      return data.output_text;
-    }
-    throw new Error('Pas de texte dans la réponse');
-  }
-
-  function formatModelsMessage(responseText) {
+  function formatModelsMessage(responseText, appliedModelId) {
     try {
       var data = JSON.parse(responseText);
       if (!data.data || !data.data.length) {
         return 'Serveur joignable';
       }
+
       var names = [];
       for (var i = 0; i < data.data.length; i += 1) {
         if (data.data[i].id) {
           names.push(data.data[i].id);
         }
       }
+
       if (!names.length) {
         return 'Serveur joignable';
       }
+
+      if (appliedModelId) {
+        return 'Serveur OK · modèle « ' + appliedModelId + ' » sélectionné';
+      }
+
       return 'Serveur joignable · modèles : ' + names.join(', ');
     } catch (err) {
       return 'Serveur joignable';
@@ -152,6 +149,14 @@ module.exports = function() {
       } else {
         btn.enable();
       }
+    }
+  }
+
+  function readModelTestState() {
+    try {
+      return JSON.parse(localStorage.getItem(MODEL_TEST_KEY));
+    } catch (err) {
+      return null;
     }
   }
 
@@ -185,7 +190,8 @@ module.exports = function() {
 
       xhr.onload = function() {
         if (xhr.status >= 200 && xhr.status < 300) {
-          finish(true, formatModelsMessage(xhr.responseText));
+          var appliedModelId = applyFirstModelFromResponse(xhr.responseText);
+          finish(true, formatModelsMessage(xhr.responseText, appliedModelId));
           return;
         }
         if (xhr.status === 401) {
@@ -248,8 +254,7 @@ module.exports = function() {
   function testModelPrompt() {
     var baseUrl = getServerUrl();
     var apiKey = getApiKey();
-    var model = getModel();
-    var sessionKey = getSessionKey();
+    var model = getFieldValue('MODEL') || 'hermes';
 
     if (!baseUrl) {
       setApiTestStatus('<span style="color:#c00">Serveur requis</span>');
@@ -260,7 +265,14 @@ module.exports = function() {
       return;
     }
 
-    setApiTestStatus('Test modèle « ' + escapeHtml(model) + ' »…');
+    snapshotFormToStorage();
+
+    localStorage.setItem(MODEL_TEST_KEY, JSON.stringify({
+      status: 'pending',
+      requestedAt: Date.now()
+    }));
+
+    setApiTestStatus('Test chat via l’app (modèle « ' + escapeHtml(model) + ' »)…');
     setButtonDisabled('api-test', true);
     setButtonDisabled('model-test', true);
 
@@ -271,63 +283,21 @@ module.exports = function() {
       setApiTestStatus('<span style="color:' + color + '">' + message + '</span>');
     }
 
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', baseUrl + '/v1/chat/completions', true);
-    xhr.timeout = CHAT_TEST_TIMEOUT_MS;
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.setRequestHeader('Authorization', 'Bearer ' + apiKey);
-    xhr.setRequestHeader('X-Hermes-Session-Key', sessionKey);
+    var startedAt = Date.now();
+    var pollTimer = setInterval(function() {
+      var state = readModelTestState();
 
-    xhr.onload = function() {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          var reply = extractReplyBody(xhr.responseText);
-          if (!reply) {
-            finish(false, 'Modèle OK mais réponse vide');
-            return;
-          }
-          var preview = reply.replace(/\s+/g, ' ').substring(0, 160);
-          finish(
-            true,
-            'Modèle OK · ' + escapeHtml(preview) + (reply.length > 160 ? '…' : '')
-          );
-        } catch (err) {
-          finish(false, escapeHtml(err.message || 'Réponse invalide'));
-        }
+      if (state && state.status === 'done') {
+        clearInterval(pollTimer);
+        finish(state.success, escapeHtml(state.message || 'Terminé'));
         return;
       }
 
-      if (xhr.status === 401) {
-        finish(false, 'Clé API invalide');
-        return;
+      if (Date.now() - startedAt > MODEL_TEST_WAIT_MS) {
+        clearInterval(pollTimer);
+        finish(false, 'Timeout attente réponse');
       }
-
-      try {
-        var errData = JSON.parse(xhr.responseText);
-        if (errData.error && errData.error.message) {
-          finish(false, escapeHtml(String(errData.error.message).substring(0, 120)));
-          return;
-        }
-      } catch (parseErr) {
-        console.log('Model test error parse failed: ' + parseErr);
-      }
-
-      finish(false, 'Erreur HTTP ' + xhr.status);
-    };
-
-    xhr.onerror = function() {
-      finish(false, 'Serveur injoignable');
-    };
-
-    xhr.ontimeout = function() {
-      finish(false, 'Timeout (>2 min) — Hermes trop lent');
-    };
-
-    xhr.send(JSON.stringify({
-      model: model,
-      messages: [{ role: 'user', content: TEST_PROMPT }],
-      stream: false
-    }));
+    }, MODEL_TEST_POLL_MS);
   }
 
   clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {

@@ -63,7 +63,7 @@ module.exports = [
   {
     type: 'text',
     id: 'api-test-status',
-    defaultValue: '<b>Connexion</b> : serveur + clé (GET /health, /v1/models).<br><b>Modèle</b> : envoie un vrai prompt chat depuis le téléphone.'
+    defaultValue: '<b>Connexion</b> : remplit le modèle automatiquement.<br><b>Prompt</b> : test chat via l’app Pebble (même chemin que la montre).'
   },
   {
     type: 'submit',
