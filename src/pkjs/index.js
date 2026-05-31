@@ -71,8 +71,19 @@ function getConfig() {
     HERMES_KEY: pickString(stored.HERMES_KEY),
     SESSION_KEY: pickString(stored.SESSION_KEY),
     MODEL: pickString(stored.MODEL),
-    PAIRING_SERVER: pickString(stored.PAIRING_SERVER)
+    PAIRING_SERVER: pickString(stored.PAIRING_SERVER),
+    PAIRING_KEY: pickString(stored.PAIRING_KEY)
   };
+}
+
+function getRegisterKey(config) {
+  if (config.PAIRING_KEY) {
+    return config.PAIRING_KEY;
+  }
+  if (config.HERMES_KEY) {
+    return config.HERMES_KEY;
+  }
+  return '';
 }
 
 function isConfigured(config) {
@@ -171,6 +182,11 @@ function savePairedConfig(config) {
   }
 
   localStorage.setItem('clay-settings', JSON.stringify(stored));
+
+  if (stored.HERMES_KEY && stored.PAIRING_KEY) {
+    delete stored.PAIRING_KEY;
+    localStorage.setItem('clay-settings', JSON.stringify(stored));
+  }
 }
 
 function stopPairingPoll() {
@@ -244,20 +260,38 @@ function pollPairingConfig() {
   xhr.send();
 }
 
-function startPairing() {
-  stopPairingPoll();
-
-  var config = getConfig();
+function registerPairingCode(code, config, callback) {
   var baseUrl = getPairingServerUrl(config);
   if (!baseUrl) {
-    sendStatus('Serveur requis (Settings)');
+    callback(false);
     return;
   }
 
-  pairingActive = true;
-  pairingCode = generatePairCode();
-  sendPairCode(pairingCode);
+  var registerKey = getRegisterKey(config);
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', baseUrl + '/pair/register', true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  if (registerKey) {
+    xhr.setRequestHeader('Authorization', 'Bearer ' + registerKey);
+  }
 
+  xhr.onload = function () {
+    callback(xhr.status >= 200 && xhr.status < 300);
+  };
+
+  xhr.onerror = function () {
+    callback(false);
+  };
+
+  xhr.ontimeout = function () {
+    callback(false);
+  };
+
+  xhr.timeout = HTTP_TIMEOUT_MS;
+  xhr.send(JSON.stringify({ code: code }));
+}
+
+function beginPairingPoll() {
   pairingPollTimer = setInterval(pollPairingConfig, PAIR_POLL_INTERVAL_MS);
   pollPairingConfig();
 
@@ -268,6 +302,39 @@ function startPairing() {
     stopPairingPoll();
     sendStatus('Expiration');
   }, PAIR_TIMEOUT_MS);
+}
+
+function startPairing() {
+  stopPairingPoll();
+
+  var config = getConfig();
+  var baseUrl = getPairingServerUrl(config);
+  if (!baseUrl) {
+    sendStatus('Serveur requis (Settings)');
+    return;
+  }
+
+  if (!getRegisterKey(config)) {
+    sendStatus('Clé API (Settings)');
+    return;
+  }
+
+  pairingActive = true;
+  pairingCode = generatePairCode();
+  sendPairCode(pairingCode);
+  sendStatus('Enregistrement...');
+
+  registerPairingCode(pairingCode, config, function (ok) {
+    if (!pairingActive) {
+      return;
+    }
+    if (!ok) {
+      sendStatus('Enregistrement échoué');
+      stopPairingPoll();
+      return;
+    }
+    beginPairingPoll();
+  });
 }
 
 function sendNextChunk() {
