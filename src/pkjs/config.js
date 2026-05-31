@@ -5,7 +5,7 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: '<b>Première fois :</b> serveur + clé API ci-dessous → Enregistrer.<br><b>Ensuite :</b> bouton <b>UP</b> sur la montre = appairage automatique (plus de terminal).'
+    defaultValue: '<b>Première fois :</b> serveur + clé API + modèle <b>hermes</b> → Enregistrer.<br><b>Ensuite :</b> bouton <b>UP</b> sur la montre = appairage, ou dictée directe si Settings OK.'
   },
   {
     type: 'section',
@@ -27,6 +27,24 @@ module.exports = [
         attributes: {
           type: 'password',
           placeholder: 'API_SERVER_KEY (~/.hermes/.env)'
+        }
+      },
+      {
+        type: 'input',
+        messageKey: 'MODEL',
+        label: 'Modèle',
+        defaultValue: 'hermes',
+        attributes: {
+          placeholder: 'hermes'
+        }
+      },
+      {
+        type: 'input',
+        messageKey: 'SESSION_KEY',
+        label: 'Session (mémoire)',
+        defaultValue: '',
+        attributes: {
+          placeholder: 'pebble:emilien'
         }
       }
     ]

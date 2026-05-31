@@ -12,8 +12,12 @@ var clay = new Clay(clayConfig, customClay, {
 
 var CHUNK_BYTES = 200;
 var HTTP_TIMEOUT_MS = 60000;
+var CHAT_TIMEOUT_MS = 180000;
 var PAIR_POLL_INTERVAL_MS = 2000;
 var PAIR_TIMEOUT_MS = 60000;
+var DEFAULT_MODEL = 'hermes';
+var DEFAULT_SESSION_KEY = 'pebble:default';
+var CHAT_COMPLETIONS_PATH = '/v1/chat/completions';
 
 var pendingChunks = [];
 var chunkIndex = 0;
@@ -38,7 +42,52 @@ Pebble.addEventListener('webviewclosed', function (e) {
     return;
   }
   clay.getSettings(e.response);
+  ensureConfigDefaults();
 });
+
+function ensureConfigDefaults() {
+  var stored = {};
+  try {
+    stored = JSON.parse(localStorage.getItem('clay-settings')) || {};
+  } catch (err) {
+    stored = {};
+  }
+
+  var changed = false;
+
+  if (!pickString(stored.MODEL)) {
+    stored.MODEL = DEFAULT_MODEL;
+    changed = true;
+  }
+
+  if (!pickString(stored.SESSION_KEY)) {
+    stored.SESSION_KEY = DEFAULT_SESSION_KEY;
+    changed = true;
+  }
+
+  var resolved = resolveHermesRequest({
+    HERMES_URL: pickString(stored.HERMES_URL),
+    HERMES_KEY: pickString(stored.HERMES_KEY),
+    SESSION_KEY: pickString(stored.SESSION_KEY),
+    MODEL: pickString(stored.MODEL),
+    PAIRING_SERVER: pickString(stored.PAIRING_SERVER),
+    PAIRING_KEY: pickString(stored.PAIRING_KEY)
+  });
+
+  if (!pickString(stored.HERMES_URL) && resolved.url) {
+    stored.HERMES_URL = resolved.url;
+    changed = true;
+  }
+
+  if (!pickString(stored.HERMES_KEY) && resolved.key) {
+    stored.HERMES_KEY = resolved.key;
+    changed = true;
+  }
+
+  if (changed) {
+    localStorage.setItem('clay-settings', JSON.stringify(stored));
+  }
+}
 
 function pickString(value) {
   if (value === null || value === undefined) {
@@ -94,8 +143,50 @@ function getRegisterKey(config) {
   return '';
 }
 
+function resolveApiKey(config) {
+  if (config.HERMES_KEY) {
+    return config.HERMES_KEY;
+  }
+  if (config.PAIRING_KEY) {
+    return config.PAIRING_KEY;
+  }
+  return '';
+}
+
+function resolveChatUrl(config) {
+  var url = pickString(config.HERMES_URL);
+  if (url.indexOf('/v1/chat/completions') !== -1) {
+    return url;
+  }
+
+  var base = getPairingServerUrl(config);
+  if (base) {
+    return base + CHAT_COMPLETIONS_PATH;
+  }
+
+  if (url) {
+    url = url.replace(/\/+$/, '');
+    if (url.indexOf('/v1/') === -1) {
+      return url + CHAT_COMPLETIONS_PATH;
+    }
+    return url;
+  }
+
+  return '';
+}
+
+function resolveHermesRequest(config) {
+  return {
+    url: resolveChatUrl(config),
+    key: resolveApiKey(config),
+    model: pickString(config.MODEL) || DEFAULT_MODEL,
+    sessionKey: pickString(config.SESSION_KEY) || DEFAULT_SESSION_KEY
+  };
+}
+
 function isConfigured(config) {
-  return config.HERMES_URL.length > 0 && config.HERMES_KEY.length > 0;
+  var request = resolveHermesRequest(config);
+  return request.url.length > 0 && request.key.length > 0;
 }
 
 function getHermesUrlBase(url) {
@@ -178,6 +269,8 @@ function savePairedConfig(config) {
 
   if (config.url) {
     stored.HERMES_URL = config.url;
+  } else if (config.base_url) {
+    stored.HERMES_URL = String(config.base_url).replace(/\/+$/, '') + CHAT_COMPLETIONS_PATH;
   }
   if (config.key) {
     stored.HERMES_KEY = config.key;
@@ -187,6 +280,28 @@ function savePairedConfig(config) {
   }
   if (config.model) {
     stored.MODEL = config.model;
+  }
+
+  if (!stored.HERMES_URL) {
+    var derivedUrl = resolveChatUrl({
+      HERMES_URL: '',
+      PAIRING_SERVER: stored.PAIRING_SERVER,
+      PAIRING_KEY: stored.PAIRING_KEY,
+      HERMES_KEY: stored.HERMES_KEY,
+      SESSION_KEY: stored.SESSION_KEY,
+      MODEL: stored.MODEL
+    });
+    if (derivedUrl) {
+      stored.HERMES_URL = derivedUrl;
+    }
+  }
+
+  if (!stored.MODEL) {
+    stored.MODEL = DEFAULT_MODEL;
+  }
+
+  if (!stored.SESSION_KEY) {
+    stored.SESSION_KEY = DEFAULT_SESSION_KEY;
   }
 
   localStorage.setItem('clay-settings', JSON.stringify(stored));
@@ -388,11 +503,16 @@ function extractReplyBody(responseText) {
 }
 
 function queryHermes(prompt, config) {
+  var request = resolveHermesRequest(config);
   var xhr = new XMLHttpRequest();
-  xhr.open('POST', config.HERMES_URL, true);
+
+  sendStatus('Hermes réfléchit...');
+  console.log('Hermes POST ' + request.url + ' model=' + request.model);
+
+  xhr.open('POST', request.url, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.setRequestHeader('Authorization', 'Bearer ' + config.HERMES_KEY);
-  xhr.setRequestHeader('X-Hermes-Session-Key', config.SESSION_KEY);
+  xhr.setRequestHeader('Authorization', 'Bearer ' + request.key);
+  xhr.setRequestHeader('X-Hermes-Session-Key', request.sessionKey);
 
   xhr.onload = function () {
     if (xhr.status >= 200 && xhr.status < 300) {
@@ -405,13 +525,18 @@ function queryHermes(prompt, config) {
       return;
     }
 
+    if (xhr.status === 401) {
+      sendStatus('Clé API invalide');
+      return;
+    }
+
     sendStatus('Erreur HTTP ' + xhr.status);
   };
 
-  xhr.timeout = HTTP_TIMEOUT_MS;
+  xhr.timeout = CHAT_TIMEOUT_MS;
 
   xhr.ontimeout = function () {
-    sendStatus('Hermes injoignable');
+    sendStatus('Timeout Hermes (>3 min)');
   };
 
   xhr.onerror = function () {
@@ -419,7 +544,7 @@ function queryHermes(prompt, config) {
   };
 
   xhr.send(JSON.stringify({
-    model: config.MODEL,
+    model: request.model,
     messages: [{ role: 'user', content: prompt }],
     stream: false
   }));
@@ -447,7 +572,7 @@ Pebble.addEventListener('appmessage', function (e) {
 
   var config = getConfig();
   if (!isConfigured(config)) {
-    sendStatus('Non configuré · UP appairer');
+    sendStatus('Settings: serveur + clé');
     return;
   }
 
@@ -456,5 +581,6 @@ Pebble.addEventListener('appmessage', function (e) {
 
 Pebble.addEventListener('ready', function () {
   clearLegacyPresetIfPresent();
+  ensureConfigDefaults();
   console.log('Hermes for Pebble ready');
 });
