@@ -63,7 +63,7 @@ module.exports = [
   {
     type: 'text',
     id: 'api-test-status',
-    defaultValue: '<b>Connexion</b> : remplit le modèle automatiquement.<br><b>Prompt</b> : test chat via l’app Pebble (même chemin que la montre).'
+    defaultValue: '<b>Connexion</b> : remplit le modèle auto.<br><b>Prompt</b> : POST chat direct (sans header session, testé sur montre avec session).'
   },
   {
     type: 'submit',
