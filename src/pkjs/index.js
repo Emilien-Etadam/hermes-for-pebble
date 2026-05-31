@@ -17,6 +17,10 @@ var pairingPollTimer = null;
 var pairingTimeoutTimer = null;
 var pairingPollInFlight = false;
 
+var LEGACY_PRESET_URL = 'http://192.168.30.140:8642/v1/chat/completions';
+var LEGACY_PRESET_KEY = '698e3bbc841346e098bc46b69d43f7b7';
+var LEGACY_PRESET_SESSION = 'pebble:emilien';
+
 Pebble.addEventListener('showConfiguration', function () {
   Pebble.openURL(clay.generateUrl());
 });
@@ -33,6 +37,25 @@ function pickString(value) {
     return '';
   }
   return String(value).trim();
+}
+
+function clearLegacyPresetIfPresent() {
+  var stored = {};
+  try {
+    stored = JSON.parse(localStorage.getItem('clay-settings')) || {};
+  } catch (err) {
+    return;
+  }
+
+  if (stored.HERMES_URL === LEGACY_PRESET_URL &&
+      stored.HERMES_KEY === LEGACY_PRESET_KEY &&
+      stored.SESSION_KEY === LEGACY_PRESET_SESSION) {
+    delete stored.HERMES_URL;
+    delete stored.HERMES_KEY;
+    delete stored.SESSION_KEY;
+    delete stored.MODEL;
+    localStorage.setItem('clay-settings', JSON.stringify(stored));
+  }
 }
 
 function getConfig() {
@@ -357,5 +380,6 @@ Pebble.addEventListener('appmessage', function (e) {
 });
 
 Pebble.addEventListener('ready', function () {
+  clearLegacyPresetIfPresent();
   console.log('Hermes for Pebble ready');
 });
