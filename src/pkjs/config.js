@@ -78,7 +78,7 @@ module.exports = [
     type: 'button',
     id: 'update-download',
     primary: true,
-    defaultValue: 'Télécharger la mise à jour'
+    defaultValue: 'Installer la mise à jour'
   },
   {
     type: 'text',

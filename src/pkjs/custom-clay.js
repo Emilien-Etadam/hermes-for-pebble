@@ -2,6 +2,7 @@ module.exports = function() {
   var clayConfig = this;
   var HTTP_TIMEOUT_MS = 10000;
   var latestDownloadUrl = null;
+  var latestReleasePageUrl = null;
 
   function pickString(value) {
     if (value === null || value === undefined) {
@@ -104,6 +105,49 @@ module.exports = function() {
     return 'Emilien-Etadam/hermes-for-pebble';
   }
 
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function openExternalUrl(url) {
+    var link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function buildDownloadHelpHtml() {
+    var parts = [];
+
+    if (latestDownloadUrl) {
+      parts.push(
+        '<a href="' + escapeHtml(latestDownloadUrl) + '" target="_blank" rel="noopener">' +
+        'Télécharger le .pbw</a>'
+      );
+    }
+
+    if (latestReleasePageUrl) {
+      parts.push(
+        '<a href="' + escapeHtml(latestReleasePageUrl) + '" target="_blank" rel="noopener">' +
+        'Page release GitHub</a>'
+      );
+    }
+
+    if (!parts.length) {
+      return '';
+    }
+
+    return 'Si l’installation ne démarre pas, touchez :<br>' + parts.join('<br>');
+  }
+
   function findPbwAsset(release) {
     if (!release || !release.assets) {
       return null;
@@ -118,8 +162,9 @@ module.exports = function() {
     return null;
   }
 
-  function setDownloadAvailable(available, downloadUrl, latestVersion) {
+  function setDownloadAvailable(available, downloadUrl, latestVersion, releasePageUrl) {
     latestDownloadUrl = available ? downloadUrl : null;
+    latestReleasePageUrl = available ? releasePageUrl : null;
     var downloadBtn = clayConfig.getItemById('update-download');
     if (!downloadBtn) {
       return;
@@ -127,10 +172,11 @@ module.exports = function() {
 
     if (available) {
       downloadBtn.show();
-      downloadBtn.set('Télécharger v' + latestVersion);
+      downloadBtn.set('Installer v' + latestVersion);
     } else {
       downloadBtn.hide();
-      downloadBtn.set('Télécharger la mise à jour');
+      downloadBtn.set('Installer la mise à jour');
+      latestReleasePageUrl = null;
     }
   }
 
@@ -260,9 +306,13 @@ module.exports = function() {
           }
 
           if (compareVersions(latestVersion, installedVersion) > 0) {
-            if (downloadUrl) {
-              setDownloadAvailable(true, downloadUrl, latestVersion);
-              finish('Mise à jour v' + latestVersion + ' disponible.', true);
+            var releasePageUrl = pickString(release.html_url);
+            if (downloadUrl || releasePageUrl) {
+              setDownloadAvailable(true, downloadUrl, latestVersion, releasePageUrl);
+              finish(
+                'Mise à jour v' + latestVersion + ' disponible.<br>' + buildDownloadHelpHtml(),
+                true
+              );
             } else {
               finish('Mise à jour v' + latestVersion + ' sans fichier .pbw.', false);
             }
@@ -298,13 +348,23 @@ module.exports = function() {
   }
 
   function downloadLatestUpdate() {
-    if (!latestDownloadUrl) {
+    var openUrl = latestReleasePageUrl || latestDownloadUrl;
+
+    if (!openUrl) {
       setUpdateStatus('<span style="color:#c00">Aucune mise à jour disponible</span>');
       return;
     }
 
-    window.location.href = latestDownloadUrl;
-    setUpdateStatus('Ouverture du fichier .pbw…<br>Ouvrez-le avec l’app Pebble si besoin.');
+    try {
+      openExternalUrl(openUrl);
+    } catch (err) {
+      console.log('openExternalUrl failed: ' + err);
+    }
+
+    setUpdateStatus(
+      '<span style="color:#080">Ouverture dans le navigateur…</span><br>' +
+      buildDownloadHelpHtml()
+    );
   }
 
   clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
