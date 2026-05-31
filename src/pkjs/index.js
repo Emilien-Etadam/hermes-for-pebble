@@ -1,6 +1,7 @@
 var Clay = require('pebble-clay');
 var clayConfig = require('./config');
-var clay = new Clay(clayConfig, null, { autoHandleEvents: false });
+var customClay = require('./custom-clay');
+var clay = new Clay(clayConfig, customClay, { autoHandleEvents: false });
 
 var CHUNK_BYTES = 200;
 var HTTP_TIMEOUT_MS = 60000;

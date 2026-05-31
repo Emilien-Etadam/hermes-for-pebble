@@ -32,6 +32,17 @@ module.exports = [
     ]
   },
   {
+    type: 'button',
+    id: 'api-test',
+    primary: true,
+    defaultValue: 'Tester l’API'
+  },
+  {
+    type: 'text',
+    id: 'api-test-status',
+    defaultValue: 'Vérifie que le téléphone atteint le serveur Hermes.'
+  },
+  {
     type: 'submit',
     defaultValue: 'Enregistrer'
   }
