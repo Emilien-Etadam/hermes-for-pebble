@@ -43,6 +43,31 @@ module.exports = [
     defaultValue: 'Vérifie que le téléphone atteint le serveur Hermes.'
   },
   {
+    type: 'heading',
+    defaultValue: 'Mise à jour'
+  },
+  {
+    type: 'text',
+    id: 'app-version',
+    defaultValue: 'Version installée : …'
+  },
+  {
+    type: 'button',
+    id: 'update-check',
+    defaultValue: 'Vérifier les mises à jour'
+  },
+  {
+    type: 'button',
+    id: 'update-download',
+    primary: true,
+    defaultValue: 'Télécharger la mise à jour'
+  },
+  {
+    type: 'text',
+    id: 'update-status',
+    defaultValue: 'Contrôle automatique au chargement.'
+  },
+  {
     type: 'submit',
     defaultValue: 'Enregistrer'
   }

@@ -1,7 +1,14 @@
 var Clay = require('pebble-clay');
 var clayConfig = require('./config');
 var customClay = require('./custom-clay');
-var clay = new Clay(clayConfig, customClay, { autoHandleEvents: false });
+var appInfo = require('app_package.json');
+var clay = new Clay(clayConfig, customClay, {
+  autoHandleEvents: false,
+  userData: {
+    version: appInfo.version,
+    repo: 'Emilien-Etadam/hermes-for-pebble'
+  }
+});
 
 var CHUNK_BYTES = 200;
 var HTTP_TIMEOUT_MS = 60000;
