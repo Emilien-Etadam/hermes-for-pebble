@@ -18,7 +18,7 @@ static Window *s_window;
 static TextLayer *s_status_layer;
 static ScrollLayer *s_scroll_layer;
 static TextLayer *s_reply_layer;
-static ActionBarLayer *s_action_bar;
+static BitmapLayer *s_logo_layer;
 
 static char s_status_text[STATUS_TEXT_MAX];
 
@@ -64,6 +64,27 @@ static void vibe_notify_prompt_sent(void) {
   vibe_play(s_vibe_prompt_pattern, VIBE_PROMPT_SEGMENTS);
 }
 
+static bool status_indicates_waiting(const char *text) {
+  if (text == NULL || text[0] == '\0') {
+    return false;
+  }
+
+  return strstr(text, "Thinking") != NULL
+      || strstr(text, "Hermes") != NULL
+      || strstr(text, "Sending") != NULL
+      || strstr(text, "Transfer") != NULL;
+}
+
+static void waiting_ui_set_visible(bool visible) {
+  if (s_logo_layer != NULL) {
+    layer_set_hidden(bitmap_layer_get_layer(s_logo_layer), !visible);
+  }
+
+  if (s_scroll_layer != NULL) {
+    layer_set_hidden(scroll_layer_get_layer(s_scroll_layer), visible);
+  }
+}
+
 static void set_status(const char *text) {
   if (text == NULL) {
     text = "";
@@ -72,6 +93,7 @@ static void set_status(const char *text) {
   strncpy(s_status_text, text, sizeof(s_status_text) - 1);
   s_status_text[sizeof(s_status_text) - 1] = '\0';
   text_layer_set_text(s_status_layer, s_status_text);
+  waiting_ui_set_visible(status_indicates_waiting(text));
 }
 
 static void reply_transfer_reset(void) {
@@ -159,6 +181,7 @@ static void reply_finalize(void) {
   layer_mark_dirty(text_layer_get_layer(s_reply_layer));
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 
+  waiting_ui_set_visible(false);
   set_status("Up/Down to scroll");
   vibe_notify_success();
 
@@ -371,16 +394,10 @@ static void main_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
 
-static void window_appear(Window *window) {
-  if (s_action_bar != NULL) {
-    action_bar_layer_set_click_config_provider(s_action_bar, main_click_config_provider);
-  }
-}
-
 static void window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
-  const int16_t content_w = bounds.size.w - ACTION_BAR_WIDTH;
+  const int16_t content_w = bounds.size.w;
 
   s_status_layer = text_layer_create(GRect(0, 0, bounds.size.w, STATUS_HEIGHT));
   text_layer_set_font(s_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
@@ -400,10 +417,18 @@ static void window_load(Window *window) {
   scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_reply_layer));
   layer_add_child(window_layer, scroll_layer_get_layer(s_scroll_layer));
 
-  s_action_bar = action_bar_layer_create();
-  action_bar_layer_add_to_window(s_action_bar, window);
-  action_bar_layer_set_click_config_provider(s_action_bar, main_click_config_provider);
-  action_bar_layer_set_background_color(s_action_bar, GColorBlack);
+  GBitmap *logo_bitmap = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_HERMES_LOGO);
+  GSize logo_size = gbitmap_get_bounds(logo_bitmap).size;
+  const int16_t logo_x = (content_w - logo_size.w) / 2;
+  const int16_t logo_y = STATUS_HEIGHT + (bounds.size.h - STATUS_HEIGHT - logo_size.h) / 2;
+  s_logo_layer = bitmap_layer_create(GRect(logo_x, logo_y, logo_size.w, logo_size.h));
+  bitmap_layer_set_bitmap(s_logo_layer, logo_bitmap);
+  bitmap_layer_set_background_color(s_logo_layer, GColorClear);
+  gbitmap_destroy(logo_bitmap);
+  layer_add_child(window_layer, bitmap_layer_get_layer(s_logo_layer));
+  layer_set_hidden(bitmap_layer_get_layer(s_logo_layer), true);
+
+  window_set_click_config_provider(window, main_click_config_provider);
 
 #if defined(PBL_MICROPHONE)
   set_status("SELECT to speak");
@@ -413,10 +438,9 @@ static void window_load(Window *window) {
 }
 
 static void window_unload(Window *window) {
-  if (s_action_bar != NULL) {
-    action_bar_layer_remove_from_window(s_action_bar);
-    action_bar_layer_destroy(s_action_bar);
-    s_action_bar = NULL;
+  if (s_logo_layer != NULL) {
+    bitmap_layer_destroy(s_logo_layer);
+    s_logo_layer = NULL;
   }
 
   text_layer_set_text(s_reply_layer, "");
@@ -433,7 +457,6 @@ static void init(void) {
   window_set_window_handlers(s_window, (WindowHandlers) {
     .load = window_load,
     .unload = window_unload,
-    .appear = window_appear,
   });
 
   window_stack_push(s_window, true);
