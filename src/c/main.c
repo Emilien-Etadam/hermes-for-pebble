@@ -81,18 +81,6 @@ static bool reply_accum_append(const char *chunk) {
   return true;
 }
 
-static void status_preview_reply(const char *text) {
-  char preview[STATUS_TEXT_MAX];
-
-  if (text == NULL || text[0] == '\0') {
-    set_status("Réponse vide");
-    return;
-  }
-
-  snprintf(preview, sizeof(preview), "%.42s%s", text, strlen(text) > 42 ? "…" : "");
-  set_status(preview);
-}
-
 static void reply_finalize(void) {
   char *previous_display = s_reply_display;
 
@@ -118,23 +106,30 @@ static void reply_finalize(void) {
   s_received_reply_parts = 0;
 
   const char *text = s_reply_display;
-  const int scroll_width = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.w;
-  const GSize max_size = GSize(scroll_width, 20000);
+  const GRect scroll_bounds = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer));
+  const int scroll_width = scroll_bounds.size.w;
+  const int viewport_h = scroll_bounds.size.h;
 
-  text_layer_set_size(s_reply_layer, max_size);
+  text_layer_set_size(s_reply_layer, GSize(scroll_width, 20000));
   text_layer_set_text(s_reply_layer, text);
 
   GSize content_size = text_layer_get_content_size(s_reply_layer);
+  if (content_size.h < viewport_h) {
+    content_size.h = viewport_h;
+  }
   if (content_size.h < REPLY_LINE_HEIGHT) {
     content_size.h = REPLY_LINE_HEIGHT;
   }
+
   text_layer_set_size(s_reply_layer, GSize(scroll_width, content_size.h));
-  scroll_layer_set_content_size(s_scroll_layer, content_size);
+  scroll_layer_set_content_size(s_scroll_layer, GSize(scroll_width, content_size.h));
   scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, 0), false);
+
+  layer_set_hidden(text_layer_get_layer(s_reply_layer), false);
   layer_mark_dirty(text_layer_get_layer(s_reply_layer));
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 
-  status_preview_reply(text);
+  set_status("Haut/Bas defiler");
 
   free(previous_display);
 }
@@ -344,7 +339,7 @@ static void window_load(Window *window) {
   s_reply_layer = text_layer_create(GRect(0, 0, content_w, bounds.size.h - STATUS_HEIGHT));
   text_layer_set_font(s_reply_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
   text_layer_set_overflow_mode(s_reply_layer, GTextOverflowModeWordWrap);
-  text_layer_set_background_color(s_reply_layer, GColorClear);
+  text_layer_set_background_color(s_reply_layer, GColorBlack);
   text_layer_set_text_color(s_reply_layer, GColorWhite);
   scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_reply_layer));
   layer_add_child(window_layer, scroll_layer_get_layer(s_scroll_layer));
