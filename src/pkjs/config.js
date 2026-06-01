@@ -46,6 +46,16 @@ module.exports = [
         attributes: {
           placeholder: 'pebble:emilien'
         }
+      },
+      {
+        type: 'toggle',
+        messageKey: 'NO_THINK',
+        label: 'Réponse rapide (sans réflexion)',
+        defaultValue: true
+      },
+      {
+        type: 'text',
+        defaultValue: 'Si coché : <code>reasoning_effort: none</code> et <code>think: false</code> — réponses plus courtes et plus rapides sur Hermes / Ollama.'
       }
     ]
   },
