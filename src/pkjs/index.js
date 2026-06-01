@@ -235,17 +235,17 @@ function buildChatPayload(prompt, request, config) {
 function extractReplyBody(responseText, options) {
   options = options || {};
   if (!responseText) {
-    throw new Error('Réponse vide');
+    throw new Error('Empty response');
   }
 
   if (responseText.indexOf('data:') === 0) {
-    throw new Error('Stream non supporté');
+    throw new Error('Streaming not supported');
   }
 
   var data = JSON.parse(responseText);
 
   if (data.error) {
-    var errorMessage = data.error.message || data.error.code || 'Erreur Hermes';
+    var errorMessage = data.error.message || data.error.code || 'Hermes error';
     throw new Error(errorMessage);
   }
 
@@ -281,7 +281,7 @@ function extractReplyBody(responseText, options) {
     return data.content;
   }
 
-  throw new Error('Pas de texte dans la réponse');
+  throw new Error('No text in response');
 }
 
 function sendStatus(message) {
@@ -309,14 +309,14 @@ function sendNextChunk() {
       console.log('REPLY_DONE sent, bytes=' + utf8ByteLength(pendingChunks.join('')));
     }, function (err) {
       console.log('Failed to send REPLY_DONE: ' + JSON.stringify(err));
-      sendStatus('Erreur envoi réponse');
+      sendStatus('Send failed');
     });
     return;
   }
 
   var part = chunkIndex + 1;
   var total = pendingChunks.length;
-  sendStatus('Transfert ' + part + '/' + total);
+  sendStatus('Sending ' + part + '/' + total);
 
   Pebble.sendAppMessage({ REPLY_CHUNK: pendingChunks[chunkIndex] }, function () {
     chunkIndex += 1;
@@ -329,14 +329,14 @@ function sendNextChunk() {
       setTimeout(sendNextChunk, CHUNK_SEND_DELAY_MS);
       return;
     }
-    sendStatus('Transfert interrompu');
+    sendStatus('Transfer failed');
   });
 }
 
 function sendReplyChunks(text) {
   pendingChunks = prepareReplyChunks(text);
   if (!pendingChunks.length) {
-    sendStatus('Réponse vide');
+    sendStatus('Empty reply');
     return;
   }
 
@@ -350,11 +350,11 @@ function sendReplyChunks(text) {
     REPLY_PARTS: pendingChunks.length,
     REPLY_BYTES: totalBytes
   }, function () {
-    sendStatus('Transfert 0/' + pendingChunks.length);
+    sendStatus('Sending 0/' + pendingChunks.length);
     setTimeout(sendNextChunk, CHUNK_SEND_DELAY_MS);
   }, function (err) {
     console.log('Failed to send REPLY meta: ' + JSON.stringify(err));
-    sendStatus('Erreur envoi réponse');
+    sendStatus('Send failed');
   });
 }
 
@@ -367,7 +367,7 @@ function formatHttpError(responseText, status) {
   } catch (err) {
     console.log('HTTP error body parse failed: ' + err);
   }
-  return 'Erreur HTTP ' + status;
+  return 'HTTP ' + status;
 }
 
 function queryHermes(prompt, config) {
@@ -387,7 +387,7 @@ function queryHermes(prompt, config) {
   }
 
   var noThink = isNoThinkEnabled(config);
-  sendStatus(noThink ? 'Hermes (rapide)...' : 'Hermes réfléchit...');
+  sendStatus(noThink ? 'Hermes (fast)...' : 'Hermes thinking...');
   console.log(
     'Hermes POST ' + request.url +
     ' model=' + request.model +
@@ -418,14 +418,14 @@ function queryHermes(prompt, config) {
         sendReplyChunks(replyText);
       } catch (err) {
         console.log('Invalid Hermes response: ' + err);
-        var message = err && err.message ? String(err.message) : 'Réponse invalide';
+        var message = err && err.message ? String(err.message) : 'Invalid response';
         sendStatus(message.substring(0, 48));
       }
       return;
     }
 
     if (xhr.status === 401) {
-      sendStatus('Clé API invalide');
+      sendStatus('Invalid API key');
       return;
     }
 
@@ -436,12 +436,12 @@ function queryHermes(prompt, config) {
 
   xhr.ontimeout = function () {
     stopWaitTimer();
-    sendStatus('Timeout Hermes (>3 min)');
+    sendStatus('Hermes timeout');
   };
 
   xhr.onerror = function () {
     stopWaitTimer();
-    sendStatus('Hermes injoignable');
+    sendStatus('Hermes unreachable');
   };
 
   xhr.send(JSON.stringify(buildChatPayload(prompt, request, config)));
@@ -455,7 +455,7 @@ Pebble.addEventListener('appmessage', function (e) {
 
   var config = getConfig();
   if (!isConfigured(config)) {
-    sendStatus('Settings requis');
+    sendStatus('Open Settings');
     return;
   }
 

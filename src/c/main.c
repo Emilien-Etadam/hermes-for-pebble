@@ -88,12 +88,12 @@ static void reply_finalize(void) {
   if (s_reply_accum == NULL || s_reply_accum_len == 0) {
     if (s_expected_reply_parts > 0) {
       snprintf(s_status_text, sizeof(s_status_text),
-               "Transfert incomplet (%u/%u)",
+               "Incomplete (%u/%u)",
                (unsigned)s_received_reply_parts,
                (unsigned)s_expected_reply_parts);
       text_layer_set_text(s_status_layer, s_status_text);
     } else {
-      set_status("Réponse non reçue");
+      set_status("No reply received");
     }
     reply_transfer_reset();
     return;
@@ -124,7 +124,7 @@ static void reply_finalize(void) {
   layer_mark_dirty(text_layer_get_layer(s_reply_layer));
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 
-  set_status("Haut/Bas defiler");
+  set_status("Up/Down to scroll");
 
   free(previous_display);
 }
@@ -133,28 +133,28 @@ static void reply_finalize(void) {
 static void dictation_status_message(DictationSessionStatus status, char *buffer, size_t length) {
   switch (status) {
     case DictationSessionStatusFailureTranscriptionRejected:
-      snprintf(buffer, length, "Transcription refusée");
+      snprintf(buffer, length, "Transcription denied");
       break;
     case DictationSessionStatusFailureNoSpeechDetected:
-      snprintf(buffer, length, "Aucune voix détectée");
+      snprintf(buffer, length, "No speech detected");
       break;
     case DictationSessionStatusFailureConnectivityError:
-      snprintf(buffer, length, "Réseau indisponible");
+      snprintf(buffer, length, "Network unavailable");
       break;
     case DictationSessionStatusFailureRecognizerError:
-      snprintf(buffer, length, "Délai dépassé");
+      snprintf(buffer, length, "Recognizer timeout");
       break;
     case DictationSessionStatusFailureDisabled:
-      snprintf(buffer, length, "Dictée désactivée");
+      snprintf(buffer, length, "Dictation disabled");
       break;
     case DictationSessionStatusFailureSystemAborted:
-      snprintf(buffer, length, "Système occupé");
+      snprintf(buffer, length, "System busy");
       break;
     case DictationSessionStatusFailureInternalError:
-      snprintf(buffer, length, "Trop de requêtes");
+      snprintf(buffer, length, "Too many requests");
       break;
     default:
-      snprintf(buffer, length, "Erreur de dictée");
+      snprintf(buffer, length, "Dictation error");
       break;
   }
 }
@@ -164,18 +164,18 @@ static void send_prompt(const char *transcript) {
   AppMessageResult result = app_message_outbox_begin(&out_iter);
 
   if (result != APP_MSG_OK || out_iter == NULL) {
-    set_status("Envoi impossible");
+    set_status("Cannot send");
     return;
   }
 
   if (dict_write_cstring(out_iter, MESSAGE_KEY_PROMPT, transcript) != DICT_OK) {
-    set_status("Envoi impossible");
+    set_status("Cannot send");
     return;
   }
 
   result = app_message_outbox_send();
   if (result != APP_MSG_OK) {
-    set_status("Envoi impossible");
+    set_status("Cannot send");
   }
 }
 
@@ -183,7 +183,7 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
                                        char *transcription, void *context) {
   if (status == DictationSessionStatusSuccess) {
     if (transcription == NULL) {
-      set_status("Transcription vide");
+      set_status("Empty transcript");
       return;
     }
 
@@ -191,7 +191,7 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
     s_transcript[sizeof(s_transcript) - 1] = '\0';
 
     reply_accum_reset();
-    set_status("Réflexion…");
+    set_status("Thinking...");
     send_prompt(s_transcript);
     return;
   }
@@ -224,7 +224,7 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
     const char *chunk = tuple->value->cstring;
     if (chunk != NULL && chunk[0] != '\0') {
       if (!reply_accum_append(chunk)) {
-        set_status("Mémoire insuffisante");
+        set_status("Out of memory");
         reply_accum_reset();
       } else {
         s_received_reply_parts += 1;
@@ -239,11 +239,11 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
 }
 
 static void inbox_dropped_callback(AppMessageResult reason, void *context) {
-  set_status("Réception interrompue");
+  set_status("Receive failed");
 }
 
 static void outbox_failed_callback(DictionaryIterator *iter, AppMessageResult reason, void *context) {
-  set_status("Envoi impossible");
+  set_status("Cannot send");
 }
 
 static void scroll_reply_layer(int delta_y) {
@@ -275,16 +275,16 @@ static void scroll_reply_layer(int delta_y) {
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
 #if defined(PBL_MICROPHONE)
   if (s_dictation_session == NULL) {
-    set_status("Dictée indisponible");
+    set_status("Dictation unavailable");
     return;
   }
 
-  set_status("Écoute…");
+  set_status("Listening...");
   if (dictation_session_start(s_dictation_session) != DictationSessionStatusSuccess) {
-    set_status("Dictée indisponible");
+    set_status("Dictation unavailable");
   }
 #else
-  set_status("Micro indisponible");
+  set_status("No microphone");
 #endif
 }
 
@@ -345,9 +345,9 @@ static void window_load(Window *window) {
   action_bar_layer_set_background_color(s_action_bar, GColorBlack);
 
 #if defined(PBL_MICROPHONE)
-  set_status("SELECT parler");
+  set_status("SELECT to speak");
 #else
-  set_status("Micro indisponible");
+  set_status("No microphone");
 #endif
 }
 
@@ -390,7 +390,7 @@ static void init(void) {
 #if defined(PBL_MICROPHONE)
   s_dictation_session = dictation_session_create(TRANSCRIPT_MAX, dictation_session_callback, NULL);
   if (s_dictation_session == NULL) {
-    set_status("Dictée indisponible");
+    set_status("Dictation unavailable");
   }
 #endif
 }

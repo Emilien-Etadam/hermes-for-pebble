@@ -1,3 +1,9 @@
+var TERMINAL_STYLE =
+  'font-family:monospace;font-size:10px;line-height:1.3;' +
+  'background:#111;color:#bbb;padding:6px;border-radius:4px;' +
+  'border:1px solid #333;max-height:160px;overflow-y:auto;' +
+  'white-space:pre-wrap;word-break:break-word;';
+
 module.exports = [
   {
     type: 'heading',
@@ -5,7 +11,7 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: 'Configurez le serveur ici, testez la <b>connexion</b>, puis <b>Enregistrer</b>. Sur la montre : <b>SELECT</b> pour parler à Hermes (vrai chat, pas un test).'
+    defaultValue: 'Enter your Hermes server, tap <b>Test</b>, then <b>Save</b>. On the watch, press <b>SELECT</b> to speak.'
   },
   {
     type: 'section',
@@ -13,7 +19,7 @@ module.exports = [
       {
         type: 'input',
         messageKey: 'HERMES_SERVER',
-        label: 'Serveur Hermes',
+        label: 'Server',
         defaultValue: '',
         attributes: {
           placeholder: '192.168.1.10:8642'
@@ -22,17 +28,17 @@ module.exports = [
       {
         type: 'input',
         messageKey: 'HERMES_KEY',
-        label: 'Clé API',
+        label: 'API key',
         defaultValue: '',
         attributes: {
           type: 'password',
-          placeholder: 'API_SERVER_KEY'
+          placeholder: 'API key'
         }
       },
       {
         type: 'input',
         messageKey: 'MODEL',
-        label: 'Modèle',
+        label: 'Model',
         defaultValue: 'hermes',
         attributes: {
           placeholder: 'hermes'
@@ -41,21 +47,18 @@ module.exports = [
       {
         type: 'input',
         messageKey: 'SESSION_KEY',
-        label: 'Session (mémoire)',
+        label: 'Session',
         defaultValue: '',
         attributes: {
-          placeholder: 'pebble:emilien'
+          placeholder: 'pebble:you'
         }
       },
       {
         type: 'toggle',
         messageKey: 'NO_THINK',
-        label: 'Réponse rapide (sans réflexion)',
+        label: 'Fast replies',
+        description: 'Skip extended reasoning when supported',
         defaultValue: true
-      },
-      {
-        type: 'text',
-        defaultValue: 'Si coché : <code>reasoning_effort: none</code> et <code>think: false</code> — réponses plus courtes et plus rapides sur Hermes / Ollama.'
       }
     ]
   },
@@ -63,20 +66,21 @@ module.exports = [
     type: 'button',
     id: 'api-test',
     primary: true,
-    defaultValue: 'Tester la connexion'
+    defaultValue: 'Test connection'
   },
   {
     type: 'text',
     id: 'api-test-status',
-    defaultValue: '<div style="font-family:monospace;font-size:11px;background:#111;color:#888;padding:10px;border-radius:6px;border:1px solid #333;">Journal connexion (GET /health, /v1/models). Le chat Hermes se fait sur la montre via SELECT.</div>'
+    defaultValue:
+      '<div style="' + TERMINAL_STYLE + '">Connection log. Voice chat runs on the watch (SELECT).</div>'
   },
   {
     type: 'button',
     id: 'copy-logs',
-    defaultValue: 'Copier les logs'
+    defaultValue: 'Copy log'
   },
   {
     type: 'submit',
-    defaultValue: 'Enregistrer'
+    defaultValue: 'Save'
   }
 ];
