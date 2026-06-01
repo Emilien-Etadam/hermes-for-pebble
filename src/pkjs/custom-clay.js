@@ -1,13 +1,10 @@
 module.exports = function() {
   var clayConfig = this;
   var HTTP_TIMEOUT_MS = 10000;
-  var CHAT_TEST_TIMEOUT_MS = 120000;
-  var TEST_PROMPT = 'Réponds en une courte phrase : test Pebble OK.';
   var UI_FLUSH_MS = 80;
   var HEARTBEAT_MS = 2000;
   var MAX_LOG_LINES = 80;
 
-  var modelTestInFlight = false;
   var apiTestInFlight = false;
   var terminalLines = [];
   var terminalPlainLines = [];
@@ -148,7 +145,7 @@ module.exports = function() {
     }
     var body = terminalLines.length
       ? terminalLines.join('\n')
-      : '<span style="color:#888">Journal vide — lancez un test.</span>';
+      : '<span style="color:#888">Journal vide — testez la connexion.</span>';
     statusItem.set(
       '<div style="font-family:monospace;font-size:11px;line-height:1.45;' +
       'background:#111;color:#ddd;padding:10px;border-radius:6px;' +
@@ -256,14 +253,6 @@ module.exports = function() {
     return pickString(getStoredSettings().PAIRING_KEY);
   }
 
-  function getSessionKey() {
-    var session = getFieldValue('SESSION_KEY');
-    if (session) {
-      return session;
-    }
-    return 'pebble:default';
-  }
-
   function xhrStateLabel(readyState) {
     switch (readyState) {
       case 0: return 'UNSENT';
@@ -288,54 +277,6 @@ module.exports = function() {
       }
       terminalLog('http', label + ' readyState=' + xhrStateLabel(xhr.readyState) + extra);
     };
-  }
-
-  function normalizeReplyContent(content) {
-    if (content === null || content === undefined) {
-      return '';
-    }
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      var parts = [];
-      for (var i = 0; i < content.length; i += 1) {
-        var part = content[i];
-        if (typeof part === 'string' && part) {
-          parts.push(part);
-        } else if (part && typeof part === 'object' && typeof part.text === 'string' && part.text) {
-          parts.push(part.text);
-        }
-      }
-      return parts.join('\n');
-    }
-    return String(content);
-  }
-
-  function extractReplyBody(responseText) {
-    if (!responseText) {
-      throw new Error('Réponse vide');
-    }
-    if (responseText.indexOf('data:') === 0) {
-      throw new Error('Stream non supporté');
-    }
-
-    var data = JSON.parse(responseText);
-    if (data.error) {
-      throw new Error(data.error.message || data.error.code || 'Erreur Hermes');
-    }
-    if (data.choices && data.choices.length > 0) {
-      if (data.choices[0].message) {
-        return normalizeReplyContent(data.choices[0].message.content);
-      }
-      if (typeof data.choices[0].text === 'string') {
-        return data.choices[0].text;
-      }
-    }
-    if (typeof data.output_text === 'string') {
-      return data.output_text;
-    }
-    throw new Error('Pas de texte dans la réponse');
   }
 
   function applyFirstModelFromResponse(responseText) {
@@ -412,7 +353,9 @@ module.exports = function() {
       apiTestInFlight = false;
       stopHeartbeat();
       if (success) {
+        snapshotFormToStorage();
         terminalLog('ok', message);
+        terminalLog('info', 'Appuyez sur Enregistrer, puis SELECT sur la montre pour parler à Hermes');
       } else {
         terminalLog('err', message);
       }
@@ -511,165 +454,12 @@ module.exports = function() {
     flushUi(tryHealth);
   }
 
-  function testModelPrompt() {
-    if (modelTestInFlight) {
-      terminalLog('warn', 'Test prompt déjà en cours');
-      return;
-    }
-
-    var baseUrl = getServerUrl();
-    var apiKey = getApiKey();
-    var model = getFieldValue('MODEL') || 'hermes';
-    var sessionKey = getSessionKey();
-    var postUrl = baseUrl + '/v1/chat/completions';
-    var body = {
-      model: model,
-      messages: [{ role: 'user', content: TEST_PROMPT }],
-      stream: false
-    };
-
-    clearTerminal('=== Test prompt ===');
-    terminalLog('info', 'Clic bouton enregistré');
-    terminalLog('info', 'URL POST : ' + (postUrl || '(manquant)'));
-    terminalLog('info', 'Modèle : ' + model);
-    terminalLog('info', 'Clé API : ' + maskSecret(apiKey));
-    terminalLog('info', 'Session : ' + escapeHtml(sessionKey) + ' (non envoyée ici, comme test web)');
-    terminalLog('info', 'Prompt : ' + TEST_PROMPT);
-
-    if (!baseUrl) {
-      terminalLog('err', 'Serveur requis');
-      return;
-    }
-    if (!apiKey) {
-      terminalLog('err', 'Clé API requise');
-      return;
-    }
-
-    snapshotFormToStorage();
-    modelTestInFlight = true;
-
-    function finish(success, message) {
-      modelTestInFlight = false;
-      stopHeartbeat();
-      if (success) {
-        terminalLog('ok', message);
-      } else {
-        terminalLog('err', message);
-      }
-    }
-
-    function runPost() {
-      terminalLog('info', 'Préparation XMLHttpRequest…');
-      terminalLog('http', 'POST ' + postUrl);
-      terminalLog('info', 'Corps JSON : model=' + model + ', stream=false');
-      startHeartbeat('Attente réponse Hermes');
-
-      var xhr = new XMLHttpRequest();
-      try {
-        xhr.open('POST', postUrl, true);
-      } catch (openErr) {
-        stopHeartbeat();
-        finish(false, 'xhr.open : ' + (openErr.message || openErr));
-        return;
-      }
-
-      xhr.timeout = CHAT_TEST_TIMEOUT_MS;
-      attachXhrTrace(xhr, 'chat');
-
-      try {
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.setRequestHeader('Authorization', 'Bearer ' + apiKey);
-        terminalLog('info', 'En-têtes : Content-Type, Authorization');
-      } catch (headerErr) {
-        stopHeartbeat();
-        finish(false, 'En-têtes refusés : ' + (headerErr.message || headerErr));
-        return;
-      }
-
-      xhr.onload = function() {
-        stopHeartbeat();
-        var bytes = xhr.responseText ? xhr.responseText.length : 0;
-        terminalLog('http', 'POST terminé → HTTP ' + xhr.status + ' (' + bytes + ' octets)');
-
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            var reply = extractReplyBody(xhr.responseText);
-            if (!reply) {
-              finish(false, 'Réponse HTTP OK mais texte vide');
-              return;
-            }
-            var preview = reply.replace(/\s+/g, ' ').substring(0, 200);
-            finish(true, 'Réponse : ' + preview + (reply.length > 200 ? '…' : ''));
-          } catch (err) {
-            finish(false, err.message || 'Réponse invalide');
-          }
-          return;
-        }
-
-        if (xhr.status === 401) {
-          finish(false, 'Clé API invalide (401)');
-          return;
-        }
-
-        try {
-          var errData = JSON.parse(xhr.responseText);
-          if (errData.error && errData.error.message) {
-            finish(false, String(errData.error.message).substring(0, 160));
-            return;
-          }
-        } catch (parseErr) {
-          terminalLog('warn', 'Corps erreur non-JSON');
-        }
-
-        finish(false, 'Erreur HTTP ' + xhr.status);
-      };
-
-      xhr.onerror = function() {
-        stopHeartbeat();
-        finish(false, 'Réseau/CORS : POST bloqué ou serveur injoignable');
-      };
-
-      xhr.ontimeout = function() {
-        stopHeartbeat();
-        finish(false, 'Timeout (>2 min) sans réponse');
-      };
-
-      var payload;
-      try {
-        payload = JSON.stringify(body);
-        terminalLog('info', 'Payload : ' + payload.length + ' octets');
-      } catch (jsonErr) {
-        stopHeartbeat();
-        finish(false, 'JSON : ' + (jsonErr.message || jsonErr));
-        return;
-      }
-
-      flushUi(function() {
-        terminalLog('info', 'Appel xhr.send() maintenant…');
-        try {
-          xhr.send(payload);
-          terminalLog('info', 'xhr.send() retourné (requête partie)');
-        } catch (sendErr) {
-          stopHeartbeat();
-          finish(false, 'xhr.send : ' + (sendErr.message || sendErr));
-        }
-      });
-    }
-
-    flushUi(runPost);
-  }
-
   clayConfig.on(clayConfig.EVENTS.AFTER_BUILD, function() {
     renderTerminal();
 
     var testBtn = clayConfig.getItemById('api-test');
     if (testBtn) {
       testBtn.on('click', testApiConnection);
-    }
-
-    var modelBtn = clayConfig.getItemById('model-test');
-    if (modelBtn) {
-      modelBtn.on('click', testModelPrompt);
     }
 
     var copyBtn = clayConfig.getItemById('copy-logs');
