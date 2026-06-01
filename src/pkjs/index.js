@@ -20,10 +20,9 @@ Pebble.addEventListener('showConfiguration', function () {
 });
 
 Pebble.addEventListener('webviewclosed', function (e) {
-  if (!e || !e.response) {
-    return;
+  if (e && e.response) {
+    clay.getSettings(e.response);
   }
-  clay.getSettings(e.response);
   ensureConfigDefaults();
   syncVibrateToWatch();
 });
