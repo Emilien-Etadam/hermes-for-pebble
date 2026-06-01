@@ -3,7 +3,12 @@ module.exports = function() {
   var HTTP_TIMEOUT_MS = 10000;
   var UI_FLUSH_MS = 80;
   var HEARTBEAT_MS = 2000;
-  var MAX_LOG_LINES = 80;
+  var MAX_LOG_LINES = 50;
+  var TERMINAL_STYLE =
+    'font-family:monospace;font-size:10px;line-height:1.3;' +
+    'background:#111;color:#bbb;padding:6px;border-radius:4px;' +
+    'border:1px solid #333;max-height:160px;overflow-y:auto;' +
+    'white-space:pre-wrap;word-break:break-word;';
 
   var apiTestInFlight = false;
   var terminalLines = [];
@@ -48,7 +53,7 @@ module.exports = function() {
   function maskSecret(value) {
     var s = pickString(value);
     if (!s) {
-      return '(vide)';
+      return '(empty)';
     }
     if (s.length <= 6) {
       return '***';
@@ -125,15 +130,15 @@ module.exports = function() {
   function copyTerminalLogs() {
     var text = getTerminalPlainText();
     if (!text) {
-      terminalLog('warn', 'Rien à copier — lancez un test d’abord');
+      terminalLog('warn', 'Nothing to copy — run Test connection first');
       return;
     }
 
     copyTextWithFallback(text, function(success) {
       if (success) {
-        terminalLog('ok', 'Logs copiés dans le presse-papiers (' + terminalPlainLines.length + ' lignes)');
+        terminalLog('ok', 'Log copied (' + terminalPlainLines.length + ' lines)');
       } else {
-        terminalLog('err', 'Copie impossible — sélectionnez le journal manuellement');
+        terminalLog('err', 'Copy failed — select the log manually');
       }
     });
   }
@@ -145,15 +150,8 @@ module.exports = function() {
     }
     var body = terminalLines.length
       ? terminalLines.join('\n')
-      : '<span style="color:#888">Journal vide — testez la connexion.</span>';
-    statusItem.set(
-      '<div style="font-family:monospace;font-size:11px;line-height:1.45;' +
-      'background:#111;color:#ddd;padding:10px;border-radius:6px;' +
-      'border:1px solid #333;max-height:280px;overflow-y:auto;' +
-      'white-space:pre-wrap;word-break:break-word;">' +
-      body +
-      '</div>'
-    );
+      : '<span style="color:#888">No log yet — tap Test connection.</span>';
+    statusItem.set('<div style="' + TERMINAL_STYLE + '">' + body + '</div>');
   }
 
   function clearTerminal(title) {
@@ -309,7 +307,7 @@ module.exports = function() {
     try {
       var data = JSON.parse(responseText);
       if (!data.data || !data.data.length) {
-        return 'Serveur joignable';
+        return 'Server reachable';
       }
 
       var names = [];
@@ -320,34 +318,34 @@ module.exports = function() {
       }
 
       if (!names.length) {
-        return 'Serveur joignable';
+        return 'Server reachable';
       }
 
       if (appliedModelId) {
-        return 'Modèle « ' + appliedModelId + ' » sélectionné';
+        return 'Model set to ' + appliedModelId;
       }
 
-      return 'Modèles : ' + names.join(', ');
+      return 'Models: ' + names.join(', ');
     } catch (err) {
-      return 'Serveur joignable';
+      return 'Server reachable';
     }
   }
 
   function testApiConnection() {
     if (apiTestInFlight) {
-      terminalLog('warn', 'Test connexion déjà en cours');
+      terminalLog('warn', 'Connection test already running');
       return;
     }
 
     var baseUrl = getServerUrl();
     var apiKey = getApiKey();
 
-    clearTerminal('=== Test connexion ===');
-    terminalLog('info', 'Serveur : ' + (baseUrl || '(manquant)'));
-    terminalLog('info', 'Clé API : ' + maskSecret(apiKey));
+    clearTerminal('=== Connection test ===');
+    terminalLog('info', 'Server: ' + (baseUrl || '(missing)'));
+    terminalLog('info', 'API key: ' + maskSecret(apiKey));
 
     if (!baseUrl) {
-      terminalLog('err', 'Serveur requis');
+      terminalLog('err', 'Server URL required');
       return;
     }
 
@@ -359,7 +357,7 @@ module.exports = function() {
       if (success) {
         snapshotFormToStorage();
         terminalLog('ok', message);
-        terminalLog('info', 'Appuyez sur Enregistrer, puis SELECT sur la montre pour parler à Hermes');
+        terminalLog('info', 'Tap Save, then SELECT on the watch to chat');
       } else {
         terminalLog('err', message);
       }
@@ -368,7 +366,7 @@ module.exports = function() {
     function tryModels() {
       var url = baseUrl + '/v1/models';
       terminalLog('http', 'GET ' + url);
-      startHeartbeat('Attente /v1/models');
+      startHeartbeat('Waiting /v1/models');
 
       var xhr = new XMLHttpRequest();
       xhr.open('GET', url, true);
@@ -387,15 +385,15 @@ module.exports = function() {
           return;
         }
         if (xhr.status === 401) {
-          finish(false, 'Clé API invalide');
+          finish(false, 'Invalid API key');
           return;
         }
-        finish(false, 'Erreur HTTP ' + xhr.status);
+        finish(false, 'HTTP ' + xhr.status);
       };
 
       xhr.onerror = function() {
         stopHeartbeat();
-        finish(false, 'Réseau : GET /v1/models échoué');
+        finish(false, 'Network error (GET /v1/models)');
       };
 
       xhr.ontimeout = function() {
@@ -410,7 +408,7 @@ module.exports = function() {
     function tryHealth() {
       var url = baseUrl + '/health';
       terminalLog('http', 'GET ' + url);
-      startHeartbeat('Attente /health');
+      startHeartbeat('Waiting /health');
 
       var xhr = new XMLHttpRequest();
       xhr.open('GET', url, true);
@@ -425,25 +423,25 @@ module.exports = function() {
             tryModels();
             return;
           }
-          finish(true, 'Serveur joignable (sans test clé)');
+          finish(true, 'Server reachable (key not tested)');
           return;
         }
         if (apiKey) {
-          terminalLog('warn', '/health HTTP ' + xhr.status + ' — essai /v1/models');
+          terminalLog('warn', '/health HTTP ' + xhr.status + ' — trying /v1/models');
           tryModels();
           return;
         }
-        finish(false, 'Erreur HTTP ' + xhr.status + ' sur /health');
+        finish(false, 'HTTP ' + xhr.status + ' on /health');
       };
 
       xhr.onerror = function() {
         stopHeartbeat();
         if (apiKey) {
-          terminalLog('warn', '/health injoignable — essai /v1/models');
+          terminalLog('warn', '/health unreachable — trying /v1/models');
           tryModels();
           return;
         }
-        finish(false, 'Réseau : GET /health échoué');
+        finish(false, 'Network error (GET /health)');
       };
 
       xhr.ontimeout = function() {

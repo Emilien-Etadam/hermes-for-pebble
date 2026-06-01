@@ -1,65 +1,66 @@
 # Hermes for Pebble
 
-Client vocal Pebble pour un [Hermes Agent](https://github.com/NousResearch/hermes-agent) auto-hébergé. Dictée sur la montre, requête HTTP OpenAI-compatible côté téléphone, réponse affichée en texte défilant.
+Voice assistant for a self-hosted [Hermes Agent](https://github.com/NousResearch/hermes-agent). Speak on your Pebble; the phone sends an OpenAI-compatible request to Hermes; the reply scrolls on the watch.
 
-## Prérequis
+## Requirements
 
-- Montre compatible micro : Pebble Time, Time Steel, Time Round, Pebble 2, **Pebble Time 2** (plateforme `emery`)
-- Application mobile Pebble (Core Devices / Rebble)
-- Serveur Hermes avec API activée (`API_SERVER_ENABLED=true`, port 8642 par défaut)
+- Pebble with microphone: Time, Time Steel, Time Round, Pebble 2, **Pebble Time 2** (`emery`)
+- Pebble mobile app (Core Devices / Rebble)
+- Hermes server with API enabled (`API_SERVER_ENABLED=true`, default port 8642)
 
-## Installation
+## Install
 
-1. Télécharger **`hermes-for-pebble.pbw`** depuis [Releases](https://github.com/Emilien-Etadam/hermes-for-pebble/releases).
-2. Ouvrir le fichier avec l’app Pebble sur le téléphone pour installer sur la montre.
+1. Download **`hermes-for-pebble.pbw`** from [Releases](https://github.com/Emilien-Etadam/hermes-for-pebble/releases).
+2. Open the file in the Pebble app on your phone to install on the watch.
 
-Ou compiler vous-même :
+Or build from source:
 
 ```bash
 pebble build
-# Artefact : build/hermes-for-pebble.pbw
+# Output: build/hermes-for-pebble.pbw
 ```
 
-## Configuration (Clay)
+## Settings (phone)
 
-Dans l’app Pebble → **Settings** de *Hermes for Pebble* :
+In the Pebble app → **Settings** for *Hermes for Pebble*:
 
-| Champ | Description |
+| Field | Description |
 |-------|-------------|
-| **URL API Hermes** | Ex. `http://192.168.1.10:8642/v1/chat/completions` |
-| **Clé (Bearer)** | Valeur de `API_SERVER_KEY` sur le serveur |
-| **Session** | Clé stable pour la mémoire Hermes (`X-Hermes-Session-Key`), ex. `pebble:emilien` |
-| **Modèle** | Ex. `hermes` |
+| **Server** | e.g. `192.168.1.10:8642` |
+| **API key** | Your Hermes `API_SERVER_KEY` |
+| **Model** | e.g. `hermes` or `hermes-agent` |
+| **Session** | Stable id for Hermes memory (`X-Hermes-Session-Key`), e.g. `pebble:you` |
+| **Fast replies** | Skips extended reasoning when supported (faster responses) |
 
-Les paramètres restent sur le téléphone ; ils ne sont **pas** envoyés à la montre.
+Tap **Test connection**, then **Save**. Settings stay on the phone; they are not stored on the watch.
 
-## Utilisation
+## On the watch
 
-1. Ouvrir **Hermes for Pebble** sur la montre.
-2. Appuyer sur **SELECT** → parler → valider la transcription.
-3. La réponse s’affiche dans la zone défilante ; **Haut/Bas** pour lire.
+1. Open **Hermes for Pebble**.
+2. Press **SELECT** → speak → confirm transcription.
+3. Read the reply in the main area; **Up/Down** to scroll.
 
 ## Architecture
 
 ```
-Montre (C)                    Téléphone (PebbleKit JS)
-─────────                     ────────────────────────
-dictée → PROMPT    ────────►  POST Hermes /v1/chat/completions
-◄──────── REPLY_CHUNK (×N)    réponse découpée en chunks UTF-8 ≤200 o
-◄──────── REPLY_DONE          fin de transfert
-◄──────── STATUS              erreurs / config manquante
+Watch (C)                     Phone (PebbleKit JS)
+────────                      ────────────────────
+dictation → PROMPT    ──────► POST /v1/chat/completions
+◄──────── REPLY_CHUNK (×N)    reply split into UTF-8 chunks
+◄──────── REPLY_DONE          end of transfer
+◄──────── STATUS              status / errors
 ```
 
-## Développement
+## Development
 
 ```bash
-npm install          # pebble-clay (via pebble package install)
+npm install
 pebble build
 pebble install --phone <IP> --logs
 ```
 
-Cibles : `basalt`, `chalk`, `diorite`, `emery`.
+Platforms: `basalt`, `chalk`, `diorite`, `emery`.
 
-## Licence
+## License
 
-Projet open source — voir le dépôt pour les détails.
+Open source — see the repository for details.
