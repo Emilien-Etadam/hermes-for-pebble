@@ -11,7 +11,7 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: 'Enter your Hermes server, tap <b>Test</b>, then <b>Save</b>. On the watch, press <b>SELECT</b> to speak.'
+    defaultValue: 'Set server & API key → <b>Test</b> → <b>Save</b> (required). Watch: <b>SELECT</b> to speak, <b>Up/Down</b> to scroll.'
   },
   {
     type: 'section',
