@@ -1,7 +1,7 @@
 {
   "name": "hermes-for-pebble",
   "author": "Hermes",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "keywords": [
     "pebble-app"
   ],
@@ -39,7 +39,13 @@
       "VIBRATE_CFG"
     ],
     "resources": {
-      "media": []
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "IMAGE_HERMES_LOGO",
+          "file": "hermes_logo.png"
+        }
+      ]
     }
   }
 }
