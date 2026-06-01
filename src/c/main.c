@@ -7,6 +7,7 @@
 #define STATUS_HEIGHT 28
 #define STATUS_TEXT_MAX 128
 #define TRANSCRIPT_MAX 512
+#define REPLY_LINE_HEIGHT 28
 
 static Window *s_window;
 static TextLayer *s_status_layer;
@@ -19,6 +20,9 @@ static char s_status_text[STATUS_TEXT_MAX];
 static char *s_reply_accum = NULL;
 static size_t s_reply_accum_len = 0;
 static char *s_reply_display = NULL;
+static uint32_t s_expected_reply_parts = 0;
+static uint32_t s_expected_reply_bytes = 0;
+static uint32_t s_received_reply_parts = 0;
 
 #if defined(PBL_MICROPHONE)
 static DictationSession *s_dictation_session;
@@ -35,10 +39,17 @@ static void set_status(const char *text) {
   text_layer_set_text(s_status_layer, s_status_text);
 }
 
-static void reply_accum_reset(void) {
+static void reply_transfer_reset(void) {
   free(s_reply_accum);
   s_reply_accum = NULL;
   s_reply_accum_len = 0;
+  s_expected_reply_parts = 0;
+  s_expected_reply_bytes = 0;
+  s_received_reply_parts = 0;
+}
+
+static void reply_accum_reset(void) {
+  reply_transfer_reset();
 }
 
 static void reply_display_reset(void) {
@@ -70,18 +81,43 @@ static bool reply_accum_append(const char *chunk) {
   return true;
 }
 
+static void status_preview_reply(const char *text) {
+  char preview[STATUS_TEXT_MAX];
+
+  if (text == NULL || text[0] == '\0') {
+    set_status("Réponse vide");
+    return;
+  }
+
+  snprintf(preview, sizeof(preview), "%.42s%s", text, strlen(text) > 42 ? "…" : "");
+  set_status(preview);
+}
+
 static void reply_finalize(void) {
   char *previous_display = s_reply_display;
 
-  if (s_reply_accum != NULL && s_reply_accum_len > 0) {
-    s_reply_display = s_reply_accum;
-    s_reply_accum = NULL;
-    s_reply_accum_len = 0;
-  } else {
-    s_reply_display = NULL;
+  if (s_reply_accum == NULL || s_reply_accum_len == 0) {
+    if (s_expected_reply_parts > 0) {
+      snprintf(s_status_text, sizeof(s_status_text),
+               "Transfert incomplet (%u/%u)",
+               (unsigned)s_received_reply_parts,
+               (unsigned)s_expected_reply_parts);
+      text_layer_set_text(s_status_layer, s_status_text);
+    } else {
+      set_status("Réponse non reçue");
+    }
+    reply_transfer_reset();
+    return;
   }
 
-  const char *text = s_reply_display != NULL ? s_reply_display : "";
+  s_reply_display = s_reply_accum;
+  s_reply_accum = NULL;
+  s_reply_accum_len = 0;
+  s_expected_reply_parts = 0;
+  s_expected_reply_bytes = 0;
+  s_received_reply_parts = 0;
+
+  const char *text = s_reply_display;
   const int scroll_width = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.w;
   const GSize max_size = GSize(scroll_width, 20000);
 
@@ -89,11 +125,16 @@ static void reply_finalize(void) {
   text_layer_set_text(s_reply_layer, text);
 
   GSize content_size = text_layer_get_content_size(s_reply_layer);
+  if (content_size.h < REPLY_LINE_HEIGHT) {
+    content_size.h = REPLY_LINE_HEIGHT;
+  }
   text_layer_set_size(s_reply_layer, GSize(scroll_width, content_size.h));
   scroll_layer_set_content_size(s_scroll_layer, content_size);
   scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, 0), false);
+  layer_mark_dirty(text_layer_get_layer(s_reply_layer));
+  layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 
-  set_status("SELECT parler");
+  status_preview_reply(text);
 
   free(previous_display);
 }
@@ -172,16 +213,32 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
 #endif
 
 static void inbox_received_callback(DictionaryIterator *iter, void *context) {
-  Tuple *tuple = dict_find(iter, MESSAGE_KEY_STATUS);
-  if (tuple && tuple->length > 1) {
+  Tuple *tuple = dict_find(iter, MESSAGE_KEY_REPLY_PARTS);
+  if (tuple != NULL) {
+    s_expected_reply_parts = tuple->value->uint32;
+    s_received_reply_parts = 0;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_REPLY_BYTES);
+  if (tuple != NULL) {
+    s_expected_reply_bytes = tuple->value->uint32;
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_STATUS);
+  if (tuple != NULL && tuple->type == TUPLE_CSTRING && tuple->length > 0) {
     set_status(tuple->value->cstring);
   }
 
   tuple = dict_find(iter, MESSAGE_KEY_REPLY_CHUNK);
-  if (tuple && tuple->length > 1) {
-    if (!reply_accum_append(tuple->value->cstring)) {
-      set_status("Mémoire insuffisante");
-      reply_accum_reset();
+  if (tuple != NULL && tuple->type == TUPLE_CSTRING && tuple->length > 0) {
+    const char *chunk = tuple->value->cstring;
+    if (chunk != NULL && chunk[0] != '\0') {
+      if (!reply_accum_append(chunk)) {
+        set_status("Mémoire insuffisante");
+        reply_accum_reset();
+      } else {
+        s_received_reply_parts += 1;
+      }
     }
   }
 
