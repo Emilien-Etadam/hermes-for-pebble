@@ -5,7 +5,7 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: 'Serveur Hermes + clé API + modèle → Enregistrer. Puis <b>SELECT</b> sur la montre pour parler.'
+    defaultValue: 'Configurez le serveur ici, testez la <b>connexion</b>, puis <b>Enregistrer</b>. Sur la montre : <b>SELECT</b> pour parler à Hermes (vrai chat, pas un test).'
   },
   {
     type: 'section',
@@ -52,18 +52,13 @@ module.exports = [
   {
     type: 'button',
     id: 'api-test',
-    defaultValue: 'Tester la connexion'
-  },
-  {
-    type: 'button',
-    id: 'model-test',
     primary: true,
-    defaultValue: 'Tester le modèle (prompt)'
+    defaultValue: 'Tester la connexion'
   },
   {
     type: 'text',
     id: 'api-test-status',
-    defaultValue: '<div style="font-family:monospace;font-size:11px;background:#111;color:#888;padding:10px;border-radius:6px;border:1px solid #333;">Journal des tests (style terminal). Chaque étape HTTP s’affiche ici.</div>'
+    defaultValue: '<div style="font-family:monospace;font-size:11px;background:#111;color:#888;padding:10px;border-radius:6px;border:1px solid #333;">Journal connexion (GET /health, /v1/models). Le chat Hermes se fait sur la montre via SELECT.</div>'
   },
   {
     type: 'button',

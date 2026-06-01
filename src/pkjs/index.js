@@ -290,16 +290,40 @@ function formatHttpError(responseText, status) {
 function queryHermes(prompt, config) {
   var request = resolveHermesRequest(config);
   var xhr = new XMLHttpRequest();
+  var waitStartedAt = Date.now();
+  var heartbeatTimer = setInterval(function () {
+    var elapsed = Math.floor((Date.now() - waitStartedAt) / 1000);
+    sendStatus('Hermes… ' + elapsed + 's');
+  }, 5000);
+
+  function stopWaitTimer() {
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
 
   sendStatus('Hermes réfléchit...');
-  console.log('Hermes POST ' + request.url + ' model=' + request.model);
+  console.log(
+    'Hermes POST ' + request.url +
+    ' model=' + request.model +
+    ' session=' + request.sessionKey +
+    ' promptLen=' + (prompt ? prompt.length : 0)
+  );
 
   xhr.open('POST', request.url, true);
   xhr.setRequestHeader('Content-Type', 'application/json');
   xhr.setRequestHeader('Authorization', 'Bearer ' + request.key);
   xhr.setRequestHeader('X-Hermes-Session-Key', request.sessionKey);
 
+  xhr.onreadystatechange = function () {
+    if (xhr.readyState === 4) {
+      console.log('Hermes readyState=DONE status=' + xhr.status);
+    }
+  };
+
   xhr.onload = function () {
+    stopWaitTimer();
     console.log('Hermes HTTP ' + xhr.status + ' bytes=' + (xhr.responseText ? xhr.responseText.length : 0));
 
     if (xhr.status >= 200 && xhr.status < 300) {
@@ -324,10 +348,12 @@ function queryHermes(prompt, config) {
   xhr.timeout = CHAT_TIMEOUT_MS;
 
   xhr.ontimeout = function () {
+    stopWaitTimer();
     sendStatus('Timeout Hermes (>3 min)');
   };
 
   xhr.onerror = function () {
+    stopWaitTimer();
     sendStatus('Hermes injoignable');
   };
 
