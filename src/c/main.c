@@ -8,6 +8,7 @@
 #define STATUS_TEXT_MAX 128
 #define TRANSCRIPT_MAX 512
 #define REPLY_LINE_HEIGHT 28
+#define SCROLL_STEP_PX 48
 
 static Window *s_window;
 static TextLayer *s_status_layer;
@@ -106,17 +107,12 @@ static void reply_finalize(void) {
   s_received_reply_parts = 0;
 
   const char *text = s_reply_display;
-  const GRect scroll_bounds = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer));
-  const int scroll_width = scroll_bounds.size.w;
-  const int viewport_h = scroll_bounds.size.h;
+  const int scroll_width = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.w;
 
   text_layer_set_size(s_reply_layer, GSize(scroll_width, 20000));
   text_layer_set_text(s_reply_layer, text);
 
   GSize content_size = text_layer_get_content_size(s_reply_layer);
-  if (content_size.h < viewport_h) {
-    content_size.h = viewport_h;
-  }
   if (content_size.h < REPLY_LINE_HEIGHT) {
     content_size.h = REPLY_LINE_HEIGHT;
   }
@@ -124,7 +120,6 @@ static void reply_finalize(void) {
   text_layer_set_size(s_reply_layer, GSize(scroll_width, content_size.h));
   scroll_layer_set_content_size(s_scroll_layer, GSize(scroll_width, content_size.h));
   scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, 0), false);
-
   layer_set_hidden(text_layer_get_layer(s_reply_layer), false);
   layer_mark_dirty(text_layer_get_layer(s_reply_layer));
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
@@ -251,7 +246,7 @@ static void outbox_failed_callback(DictionaryIterator *iter, AppMessageResult re
   set_status("Envoi impossible");
 }
 
-static void scroll_by(int delta_y) {
+static void scroll_reply_layer(int delta_y) {
   if (s_scroll_layer == NULL) {
     return;
   }
@@ -274,6 +269,7 @@ static void scroll_by(int delta_y) {
   }
 
   scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, new_y), true);
+  layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 }
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -293,21 +289,19 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_scroll_layer == NULL) {
+  if (s_scroll_layer != NULL) {
+    scroll_layer_scroll_up_click_handler(recognizer, s_scroll_layer);
     return;
   }
-
-  const int viewport_h = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.h;
-  scroll_by(-(viewport_h / 2));
+  scroll_reply_layer(-SCROLL_STEP_PX);
 }
 
 static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_scroll_layer == NULL) {
+  if (s_scroll_layer != NULL) {
+    scroll_layer_scroll_down_click_handler(recognizer, s_scroll_layer);
     return;
   }
-
-  const int viewport_h = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.h;
-  scroll_by(viewport_h / 2);
+  scroll_reply_layer(SCROLL_STEP_PX);
 }
 
 static void main_click_config_provider(void *context) {
@@ -335,6 +329,7 @@ static void window_load(Window *window) {
   layer_add_child(window_layer, text_layer_get_layer(s_status_layer));
 
   s_scroll_layer = scroll_layer_create(GRect(0, STATUS_HEIGHT, content_w, bounds.size.h - STATUS_HEIGHT));
+  scroll_layer_set_context(s_scroll_layer, s_scroll_layer);
 
   s_reply_layer = text_layer_create(GRect(0, 0, content_w, bounds.size.h - STATUS_HEIGHT));
   text_layer_set_font(s_reply_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24));
