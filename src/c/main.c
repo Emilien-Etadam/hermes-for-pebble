@@ -10,6 +10,10 @@
 #define REPLY_LINE_HEIGHT 28
 #define SCROLL_STEP_PX 48
 
+#define VIBE_SUCCESS_SEGMENTS 5
+#define VIBE_ERROR_SEGMENTS 3
+#define VIBE_PROMPT_SEGMENTS 1
+
 static Window *s_window;
 static TextLayer *s_status_layer;
 static ScrollLayer *s_scroll_layer;
@@ -24,11 +28,41 @@ static char *s_reply_display = NULL;
 static uint32_t s_expected_reply_parts = 0;
 static uint32_t s_expected_reply_bytes = 0;
 static uint32_t s_received_reply_parts = 0;
+static bool s_vibrate_enabled = true;
+
+static const uint32_t s_vibe_success_pattern[] = { 80, 80, 120, 80, 200 };
+static const uint32_t s_vibe_error_pattern[] = { 200, 120, 280 };
+static const uint32_t s_vibe_prompt_pattern[] = { 60 };
 
 #if defined(PBL_MICROPHONE)
 static DictationSession *s_dictation_session;
 static char s_transcript[TRANSCRIPT_MAX];
 #endif
+
+static void vibe_play(const uint32_t *pattern, uint32_t segments) {
+  VibePattern vibe;
+
+  if (!s_vibrate_enabled || pattern == NULL || segments == 0) {
+    return;
+  }
+
+  vibes_cancel();
+  vibe.durations = pattern;
+  vibe.num_segments = segments;
+  vibes_enqueue_custom_pattern(vibe);
+}
+
+static void vibe_notify_success(void) {
+  vibe_play(s_vibe_success_pattern, VIBE_SUCCESS_SEGMENTS);
+}
+
+static void vibe_notify_error(void) {
+  vibe_play(s_vibe_error_pattern, VIBE_ERROR_SEGMENTS);
+}
+
+static void vibe_notify_prompt_sent(void) {
+  vibe_play(s_vibe_prompt_pattern, VIBE_PROMPT_SEGMENTS);
+}
 
 static void set_status(const char *text) {
   if (text == NULL) {
@@ -95,6 +129,7 @@ static void reply_finalize(void) {
     } else {
       set_status("No reply received");
     }
+    vibe_notify_error();
     reply_transfer_reset();
     return;
   }
@@ -125,6 +160,7 @@ static void reply_finalize(void) {
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 
   set_status("Up/Down to scroll");
+  vibe_notify_success();
 
   free(previous_display);
 }
@@ -165,18 +201,24 @@ static void send_prompt(const char *transcript) {
 
   if (result != APP_MSG_OK || out_iter == NULL) {
     set_status("Cannot send");
+    vibe_notify_error();
     return;
   }
 
   if (dict_write_cstring(out_iter, MESSAGE_KEY_PROMPT, transcript) != DICT_OK) {
     set_status("Cannot send");
+    vibe_notify_error();
     return;
   }
 
   result = app_message_outbox_send();
   if (result != APP_MSG_OK) {
     set_status("Cannot send");
+    vibe_notify_error();
+    return;
   }
+
+  vibe_notify_prompt_sent();
 }
 
 static void dictation_session_callback(DictationSession *session, DictationSessionStatus status,
@@ -184,6 +226,7 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
   if (status == DictationSessionStatusSuccess) {
     if (transcription == NULL) {
       set_status("Empty transcript");
+      vibe_notify_error();
       return;
     }
 
@@ -199,11 +242,26 @@ static void dictation_session_callback(DictationSession *session, DictationSessi
   char error_message[STATUS_TEXT_MAX];
   dictation_status_message(status, error_message, sizeof(error_message));
   set_status(error_message);
+  vibe_notify_error();
 }
 #endif
 
 static void inbox_received_callback(DictionaryIterator *iter, void *context) {
-  Tuple *tuple = dict_find(iter, MESSAGE_KEY_REPLY_PARTS);
+  Tuple *tuple = dict_find(iter, MESSAGE_KEY_VIBRATE_CFG);
+  if (tuple != NULL) {
+    s_vibrate_enabled = (tuple->value->uint32 != 0);
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_VIBE);
+  if (tuple != NULL) {
+    if (tuple->value->uint32 == 1) {
+      vibe_notify_success();
+    } else if (tuple->value->uint32 == 2) {
+      vibe_notify_error();
+    }
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_REPLY_PARTS);
   if (tuple != NULL) {
     s_expected_reply_parts = tuple->value->uint32;
     s_received_reply_parts = 0;
@@ -225,6 +283,7 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
     if (chunk != NULL && chunk[0] != '\0') {
       if (!reply_accum_append(chunk)) {
         set_status("Out of memory");
+        vibe_notify_error();
         reply_accum_reset();
       } else {
         s_received_reply_parts += 1;
@@ -240,10 +299,12 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
 
 static void inbox_dropped_callback(AppMessageResult reason, void *context) {
   set_status("Receive failed");
+  vibe_notify_error();
 }
 
 static void outbox_failed_callback(DictionaryIterator *iter, AppMessageResult reason, void *context) {
   set_status("Cannot send");
+  vibe_notify_error();
 }
 
 static void scroll_reply_layer(int delta_y) {
