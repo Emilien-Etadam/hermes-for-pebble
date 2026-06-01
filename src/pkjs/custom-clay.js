@@ -10,8 +10,17 @@ module.exports = function() {
   var modelTestInFlight = false;
   var apiTestInFlight = false;
   var terminalLines = [];
+  var terminalPlainLines = [];
   var heartbeatTimer = null;
   var waitStartedAt = 0;
+
+  var LEVEL_TAGS = {
+    ok: 'OK',
+    err: 'ERR',
+    warn: 'WARN',
+    http: 'HTTP',
+    info: '--'
+  };
 
   function pickString(value) {
     if (value === null || value === undefined) {
@@ -51,7 +60,9 @@ module.exports = function() {
   }
 
   function terminalLog(level, message) {
-    var prefix = '[' + nowStamp() + '] ';
+    var stamp = nowStamp();
+    var tag = LEVEL_TAGS[level] || LEVEL_TAGS.info;
+    var prefix = '[' + stamp + '] ';
     if (level === 'ok') {
       prefix += '<span style="color:#6f6">OK</span> ';
     } else if (level === 'err') {
@@ -64,10 +75,70 @@ module.exports = function() {
       prefix += '<span style="color:#aaa">--</span> ';
     }
     terminalLines.push(prefix + escapeHtml(message));
+    terminalPlainLines.push('[' + stamp + '] ' + tag + ' ' + message);
     if (terminalLines.length > MAX_LOG_LINES) {
       terminalLines = terminalLines.slice(terminalLines.length - MAX_LOG_LINES);
+      terminalPlainLines = terminalPlainLines.slice(terminalPlainLines.length - MAX_LOG_LINES);
     }
     renderTerminal();
+  }
+
+  function getTerminalPlainText() {
+    if (!terminalPlainLines.length) {
+      return '';
+    }
+    return terminalPlainLines.join('\n');
+  }
+
+  function copyTextWithFallback(text, onDone) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function() {
+        onDone(true);
+      }).catch(function() {
+        copyTextWithExecCommand(text, onDone);
+      });
+      return;
+    }
+    copyTextWithExecCommand(text, onDone);
+  }
+
+  function copyTextWithExecCommand(text, onDone) {
+    var textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+
+    var copied = false;
+    try {
+      copied = document.execCommand('copy');
+    } catch (err) {
+      copied = false;
+    }
+
+    document.body.removeChild(textarea);
+    onDone(copied);
+  }
+
+  function copyTerminalLogs() {
+    var text = getTerminalPlainText();
+    if (!text) {
+      terminalLog('warn', 'Rien à copier — lancez un test d’abord');
+      return;
+    }
+
+    copyTextWithFallback(text, function(success) {
+      if (success) {
+        terminalLog('ok', 'Logs copiés dans le presse-papiers (' + terminalPlainLines.length + ' lignes)');
+      } else {
+        terminalLog('err', 'Copie impossible — sélectionnez le journal manuellement');
+      }
+    });
   }
 
   function renderTerminal() {
@@ -90,6 +161,7 @@ module.exports = function() {
 
   function clearTerminal(title) {
     terminalLines = [];
+    terminalPlainLines = [];
     if (title) {
       terminalLog('info', title);
     }
@@ -598,6 +670,11 @@ module.exports = function() {
     var modelBtn = clayConfig.getItemById('model-test');
     if (modelBtn) {
       modelBtn.on('click', testModelPrompt);
+    }
+
+    var copyBtn = clayConfig.getItemById('copy-logs');
+    if (copyBtn) {
+      copyBtn.on('click', copyTerminalLogs);
     }
   });
 };

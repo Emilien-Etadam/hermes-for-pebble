@@ -66,6 +66,11 @@ module.exports = [
     defaultValue: '<div style="font-family:monospace;font-size:11px;background:#111;color:#888;padding:10px;border-radius:6px;border:1px solid #333;">Journal des tests (style terminal). Chaque étape HTTP s’affiche ici.</div>'
   },
   {
+    type: 'button',
+    id: 'copy-logs',
+    defaultValue: 'Copier les logs'
+  },
+  {
     type: 'submit',
     defaultValue: 'Enregistrer'
   }
