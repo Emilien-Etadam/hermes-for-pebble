@@ -212,6 +212,7 @@ module.exports = function() {
     var key = getFieldValue('HERMES_KEY');
     var model = getFieldValue('MODEL');
     var session = getFieldValue('SESSION_KEY');
+    var noThinkItem = clayConfig.getItemByMessageKey('NO_THINK');
 
     if (server) {
       stored.HERMES_SERVER = server;
@@ -224,6 +225,9 @@ module.exports = function() {
     }
     if (session) {
       stored.SESSION_KEY = session;
+    }
+    if (noThinkItem) {
+      stored.NO_THINK = noThinkItem.get();
     }
 
     localStorage.setItem('clay-settings', JSON.stringify(stored));

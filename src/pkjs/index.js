@@ -76,8 +76,23 @@ function getConfig() {
     HERMES_SERVER: pickString(stored.HERMES_SERVER),
     HERMES_KEY: pickString(stored.HERMES_KEY),
     SESSION_KEY: pickString(stored.SESSION_KEY),
-    MODEL: pickString(stored.MODEL)
+    MODEL: pickString(stored.MODEL),
+    NO_THINK: isNoThinkEnabled(stored)
   };
+}
+
+function isNoThinkEnabled(source) {
+  if (!source) {
+    return true;
+  }
+  var v = source.NO_THINK;
+  if (v === false || v === 0 || v === '0') {
+    return false;
+  }
+  if (v === true || v === 1 || v === '1') {
+    return true;
+  }
+  return true;
 }
 
 function getServerBase(server) {
@@ -202,7 +217,23 @@ function normalizeReplyContent(content) {
   return String(content);
 }
 
-function extractReplyBody(responseText) {
+function buildChatPayload(prompt, request, config) {
+  var body = {
+    model: request.model,
+    messages: [{ role: 'user', content: prompt }],
+    stream: false
+  };
+
+  if (isNoThinkEnabled(config)) {
+    body.reasoning_effort = 'none';
+    body.extra_body = { think: false };
+  }
+
+  return body;
+}
+
+function extractReplyBody(responseText, options) {
+  options = options || {};
   if (!responseText) {
     throw new Error('Réponse vide');
   }
@@ -225,11 +256,13 @@ function extractReplyBody(responseText) {
       if (fromMessage) {
         return fromMessage;
       }
-      if (typeof choice.message.refusal === 'string' && choice.message.refusal) {
-        return choice.message.refusal;
-      }
-      if (typeof choice.message.reasoning_content === 'string' && choice.message.reasoning_content) {
-        return choice.message.reasoning_content;
+      if (!options.skipReasoning) {
+        if (typeof choice.message.refusal === 'string' && choice.message.refusal) {
+          return choice.message.refusal;
+        }
+        if (typeof choice.message.reasoning_content === 'string' && choice.message.reasoning_content) {
+          return choice.message.reasoning_content;
+        }
       }
     }
     if (typeof choice.text === 'string' && choice.text) {
@@ -353,11 +386,13 @@ function queryHermes(prompt, config) {
     }
   }
 
-  sendStatus('Hermes réfléchit...');
+  var noThink = isNoThinkEnabled(config);
+  sendStatus(noThink ? 'Hermes (rapide)...' : 'Hermes réfléchit...');
   console.log(
     'Hermes POST ' + request.url +
     ' model=' + request.model +
     ' session=' + request.sessionKey +
+    ' noThink=' + noThink +
     ' promptLen=' + (prompt ? prompt.length : 0)
   );
 
@@ -378,7 +413,7 @@ function queryHermes(prompt, config) {
 
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
-        var replyText = extractReplyBody(xhr.responseText).trim();
+        var replyText = extractReplyBody(xhr.responseText, { skipReasoning: noThink }).trim();
         console.log('Hermes reply chars=' + replyText.length);
         sendReplyChunks(replyText);
       } catch (err) {
@@ -409,11 +444,7 @@ function queryHermes(prompt, config) {
     sendStatus('Hermes injoignable');
   };
 
-  xhr.send(JSON.stringify({
-    model: request.model,
-    messages: [{ role: 'user', content: prompt }],
-    stream: false
-  }));
+  xhr.send(JSON.stringify(buildChatPayload(prompt, request, config)));
 }
 
 Pebble.addEventListener('appmessage', function (e) {
