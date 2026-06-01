@@ -31,6 +31,7 @@ In the Pebble app → **Settings** for *Hermes for Pebble*:
 | **Model** | e.g. `hermes` or `hermes-agent` |
 | **Session** | Stable id for Hermes memory (`X-Hermes-Session-Key`), e.g. `pebble:you` |
 | **Fast replies** | Skips extended reasoning when supported (faster responses) |
+| **Vibration alerts** | Buzz when a reply is ready or when an error occurs |
 
 Tap **Test connection**, then **Save**. Settings stay on the phone; they are not stored on the watch.
 

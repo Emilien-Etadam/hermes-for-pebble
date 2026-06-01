@@ -25,6 +25,7 @@ Pebble.addEventListener('webviewclosed', function (e) {
   }
   clay.getSettings(e.response);
   ensureConfigDefaults();
+  syncVibrateToWatch();
 });
 
 function pickString(value) {
@@ -77,8 +78,20 @@ function getConfig() {
     HERMES_KEY: pickString(stored.HERMES_KEY),
     SESSION_KEY: pickString(stored.SESSION_KEY),
     MODEL: pickString(stored.MODEL),
-    NO_THINK: isNoThinkEnabled(stored)
+    NO_THINK: isNoThinkEnabled(stored),
+    VIBRATE_ON: isVibrateEnabled(stored)
   };
+}
+
+function isVibrateEnabled(source) {
+  if (!source) {
+    return true;
+  }
+  var v = source.VIBRATE_ON;
+  if (v === false || v === 0 || v === '0') {
+    return false;
+  }
+  return true;
 }
 
 function isNoThinkEnabled(source) {
@@ -136,9 +149,31 @@ function ensureConfigDefaults() {
     changed = true;
   }
 
+  if (stored.VIBRATE_ON === undefined) {
+    stored.VIBRATE_ON = true;
+    changed = true;
+  }
+
   if (changed) {
     saveStoredSettings(stored);
   }
+}
+
+function syncVibrateToWatch() {
+  var enabled = isVibrateEnabled(getStoredSettings());
+  Pebble.sendAppMessage({ VIBRATE_CFG: enabled ? 1 : 0 }, null, function (err) {
+    console.log('Failed to send VIBRATE_CFG: ' + JSON.stringify(err));
+  });
+}
+
+function notifyWatchVibe(kind) {
+  if (!isVibrateEnabled(getStoredSettings())) {
+    return;
+  }
+  var code = kind === 'success' ? 1 : 2;
+  Pebble.sendAppMessage({ VIBE: code }, null, function (err) {
+    console.log('Failed to send VIBE: ' + JSON.stringify(err));
+  });
 }
 
 function utf8CodePointByteLength(codePoint) {
@@ -310,6 +345,7 @@ function sendNextChunk() {
     }, function (err) {
       console.log('Failed to send REPLY_DONE: ' + JSON.stringify(err));
       sendStatus('Send failed');
+      notifyWatchVibe('error');
     });
     return;
   }
@@ -330,6 +366,7 @@ function sendNextChunk() {
       return;
     }
     sendStatus('Transfer failed');
+    notifyWatchVibe('error');
   });
 }
 
@@ -337,6 +374,7 @@ function sendReplyChunks(text) {
   pendingChunks = prepareReplyChunks(text);
   if (!pendingChunks.length) {
     sendStatus('Empty reply');
+    notifyWatchVibe('error');
     return;
   }
 
@@ -355,6 +393,7 @@ function sendReplyChunks(text) {
   }, function (err) {
     console.log('Failed to send REPLY meta: ' + JSON.stringify(err));
     sendStatus('Send failed');
+    notifyWatchVibe('error');
   });
 }
 
@@ -420,16 +459,19 @@ function queryHermes(prompt, config) {
         console.log('Invalid Hermes response: ' + err);
         var message = err && err.message ? String(err.message) : 'Invalid response';
         sendStatus(message.substring(0, 48));
+        notifyWatchVibe('error');
       }
       return;
     }
 
     if (xhr.status === 401) {
       sendStatus('Invalid API key');
+      notifyWatchVibe('error');
       return;
     }
 
     sendStatus(formatHttpError(xhr.responseText, xhr.status));
+    notifyWatchVibe('error');
   };
 
   xhr.timeout = CHAT_TIMEOUT_MS;
@@ -437,11 +479,13 @@ function queryHermes(prompt, config) {
   xhr.ontimeout = function () {
     stopWaitTimer();
     sendStatus('Hermes timeout');
+    notifyWatchVibe('error');
   };
 
   xhr.onerror = function () {
     stopWaitTimer();
     sendStatus('Hermes unreachable');
+    notifyWatchVibe('error');
   };
 
   xhr.send(JSON.stringify(buildChatPayload(prompt, request, config)));
@@ -464,5 +508,6 @@ Pebble.addEventListener('appmessage', function (e) {
 
 Pebble.addEventListener('ready', function () {
   ensureConfigDefaults();
+  syncVibrateToWatch();
   console.log('Hermes for Pebble ready');
 });

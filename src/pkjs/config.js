@@ -59,6 +59,13 @@ module.exports = [
         label: 'Fast replies',
         description: 'Skip extended reasoning when supported',
         defaultValue: true
+      },
+      {
+        type: 'toggle',
+        messageKey: 'VIBRATE_ON',
+        label: 'Vibration alerts',
+        description: 'Buzz on reply ready and errors',
+        defaultValue: true
       }
     ]
   },

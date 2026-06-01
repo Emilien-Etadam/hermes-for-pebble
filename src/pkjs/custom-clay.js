@@ -211,6 +211,7 @@ module.exports = function() {
     var model = getFieldValue('MODEL');
     var session = getFieldValue('SESSION_KEY');
     var noThinkItem = clayConfig.getItemByMessageKey('NO_THINK');
+    var vibrateItem = clayConfig.getItemByMessageKey('VIBRATE_ON');
 
     if (server) {
       stored.HERMES_SERVER = server;
@@ -226,6 +227,9 @@ module.exports = function() {
     }
     if (noThinkItem) {
       stored.NO_THINK = noThinkItem.get();
+    }
+    if (vibrateItem) {
+      stored.VIBRATE_ON = vibrateItem.get();
     }
 
     localStorage.setItem('clay-settings', JSON.stringify(stored));
