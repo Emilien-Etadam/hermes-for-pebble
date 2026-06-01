@@ -3,7 +3,9 @@ var clayConfig = require('./config');
 var customClay = require('./custom-clay');
 var clay = new Clay(clayConfig, customClay, { autoHandleEvents: false });
 
-var CHUNK_BYTES = 200;
+var CHUNK_BYTES = 180;
+var MAX_SINGLE_CHUNK_BYTES = 700;
+var CHUNK_SEND_DELAY_MS = 120;
 var CHAT_TIMEOUT_MS = 180000;
 var DEFAULT_MODEL = 'hermes';
 var DEFAULT_SESSION_KEY = 'pebble:default';
@@ -128,6 +130,10 @@ function utf8CodePointByteLength(codePoint) {
   return unescape(encodeURIComponent(codePoint)).length;
 }
 
+function utf8ByteLength(text) {
+  return unescape(encodeURIComponent(String(text || ''))).length;
+}
+
 function splitReplyIntoChunks(text) {
   text = String(text || '');
   var chunks = [];
@@ -215,18 +221,34 @@ function extractReplyBody(responseText) {
   if (data.choices && data.choices.length > 0) {
     var choice = data.choices[0];
     if (choice.message) {
-      return normalizeReplyContent(choice.message.content);
+      var fromMessage = normalizeReplyContent(choice.message.content);
+      if (fromMessage) {
+        return fromMessage;
+      }
+      if (typeof choice.message.refusal === 'string' && choice.message.refusal) {
+        return choice.message.refusal;
+      }
+      if (typeof choice.message.reasoning_content === 'string' && choice.message.reasoning_content) {
+        return choice.message.reasoning_content;
+      }
     }
-    if (typeof choice.text === 'string') {
+    if (typeof choice.text === 'string' && choice.text) {
       return choice.text;
+    }
+    if (choice.delta && typeof choice.delta.content === 'string' && choice.delta.content) {
+      return choice.delta.content;
     }
   }
 
-  if (typeof data.output_text === 'string') {
+  if (typeof data.output_text === 'string' && data.output_text) {
     return data.output_text;
   }
 
-  throw new Error('Missing reply content');
+  if (typeof data.content === 'string' && data.content) {
+    return data.content;
+  }
+
+  throw new Error('Pas de texte dans la réponse');
 }
 
 function sendStatus(message) {
@@ -235,10 +257,23 @@ function sendStatus(message) {
   });
 }
 
+function prepareReplyChunks(text) {
+  var reply = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!reply.length) {
+    return [];
+  }
+
+  if (utf8ByteLength(reply) <= MAX_SINGLE_CHUNK_BYTES) {
+    return [reply];
+  }
+
+  return splitReplyIntoChunks(reply);
+}
+
 function sendNextChunk() {
   if (chunkIndex >= pendingChunks.length) {
     Pebble.sendAppMessage({ REPLY_DONE: 1 }, function () {
-      sendStatus('SELECT parler');
+      console.log('REPLY_DONE sent, bytes=' + utf8ByteLength(pendingChunks.join('')));
     }, function (err) {
       console.log('Failed to send REPLY_DONE: ' + JSON.stringify(err));
       sendStatus('Erreur envoi réponse');
@@ -246,15 +281,19 @@ function sendNextChunk() {
     return;
   }
 
+  var part = chunkIndex + 1;
+  var total = pendingChunks.length;
+  sendStatus('Transfert ' + part + '/' + total);
+
   Pebble.sendAppMessage({ REPLY_CHUNK: pendingChunks[chunkIndex] }, function () {
     chunkIndex += 1;
     chunkRetries = 0;
-    sendNextChunk();
+    setTimeout(sendNextChunk, CHUNK_SEND_DELAY_MS);
   }, function (err) {
-    console.log('Failed to send REPLY_CHUNK: ' + JSON.stringify(err));
-    if (chunkRetries < 2) {
+    console.log('Failed to send REPLY_CHUNK ' + part + ': ' + JSON.stringify(err));
+    if (chunkRetries < 3) {
       chunkRetries += 1;
-      sendNextChunk();
+      setTimeout(sendNextChunk, CHUNK_SEND_DELAY_MS);
       return;
     }
     sendStatus('Transfert interrompu');
@@ -262,17 +301,28 @@ function sendNextChunk() {
 }
 
 function sendReplyChunks(text) {
-  var reply = String(text || '');
-  if (!reply.length) {
+  pendingChunks = prepareReplyChunks(text);
+  if (!pendingChunks.length) {
     sendStatus('Réponse vide');
     return;
   }
 
-  pendingChunks = splitReplyIntoChunks(reply);
   chunkIndex = 0;
   chunkRetries = 0;
-  sendStatus('Transfert...');
-  sendNextChunk();
+
+  var totalBytes = utf8ByteLength(pendingChunks.join(''));
+  console.log('Sending reply: ' + totalBytes + ' bytes, ' + pendingChunks.length + ' parts');
+
+  Pebble.sendAppMessage({
+    REPLY_PARTS: pendingChunks.length,
+    REPLY_BYTES: totalBytes
+  }, function () {
+    sendStatus('Transfert 0/' + pendingChunks.length);
+    setTimeout(sendNextChunk, CHUNK_SEND_DELAY_MS);
+  }, function (err) {
+    console.log('Failed to send REPLY meta: ' + JSON.stringify(err));
+    sendStatus('Erreur envoi réponse');
+  });
 }
 
 function formatHttpError(responseText, status) {
@@ -328,7 +378,9 @@ function queryHermes(prompt, config) {
 
     if (xhr.status >= 200 && xhr.status < 300) {
       try {
-        sendReplyChunks(extractReplyBody(xhr.responseText));
+        var replyText = extractReplyBody(xhr.responseText).trim();
+        console.log('Hermes reply chars=' + replyText.length);
+        sendReplyChunks(replyText);
       } catch (err) {
         console.log('Invalid Hermes response: ' + err);
         var message = err && err.message ? String(err.message) : 'Réponse invalide';
