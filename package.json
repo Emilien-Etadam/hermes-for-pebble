@@ -1,7 +1,7 @@
 {
   "name": "hermes-for-pebble",
   "author": "Hermes",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "keywords": [
     "pebble-app"
   ],
@@ -36,7 +36,11 @@
       "STATUS",
       "NO_THINK",
       "VIBE",
-      "VIBRATE_CFG"
+      "VIBRATE_CFG",
+      "HIST_OPEN",
+      "HIST_GET",
+      "HIST_COUNT",
+      "HIST_LABELS"
     ],
     "resources": {
       "media": []

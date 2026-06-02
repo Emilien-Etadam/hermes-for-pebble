@@ -212,6 +212,8 @@ module.exports = function() {
     var session = getFieldValue('SESSION_KEY');
     var noThinkItem = clayConfig.getItemByMessageKey('NO_THINK');
     var vibrateItem = clayConfig.getItemByMessageKey('VIBRATE_ON');
+    var historyOnItem = clayConfig.getItemByMessageKey('HISTORY_ON');
+    var historyMaxItem = clayConfig.getItemByMessageKey('HISTORY_MAX');
 
     if (server) {
       stored.HERMES_SERVER = server;
@@ -230,6 +232,12 @@ module.exports = function() {
     }
     if (vibrateItem) {
       stored.VIBRATE_ON = vibrateItem.get();
+    }
+    if (historyOnItem) {
+      stored.HISTORY_ON = historyOnItem.get();
+    }
+    if (historyMaxItem) {
+      stored.HISTORY_MAX = historyMaxItem.get();
     }
 
     localStorage.setItem('clay-settings', JSON.stringify(stored));

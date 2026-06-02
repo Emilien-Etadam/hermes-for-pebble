@@ -9,16 +9,31 @@
 #define TRANSCRIPT_MAX 512
 #define REPLY_LINE_HEIGHT 28
 #define SCROLL_STEP_PX 48
+#define HIST_MAX_ITEMS 20
+#define HIST_LABEL_CHARS 32
+#define HIST_LABELS_BUF 512
 
 #define VIBE_SUCCESS_SEGMENTS 5
 #define VIBE_ERROR_SEGMENTS 3
 #define VIBE_PROMPT_SEGMENTS 1
+#define BACK_LONG_PRESS_MS 800
+
+typedef enum {
+  APP_MODE_CHAT = 0,
+  APP_MODE_HISTORY_WAIT,
+  APP_MODE_HISTORY_MENU
+} AppMode;
 
 static Window *s_window;
 static TextLayer *s_status_layer;
 static ScrollLayer *s_scroll_layer;
 static TextLayer *s_reply_layer;
 static ActionBarLayer *s_action_bar;
+
+static Window *s_hist_menu_window;
+static SimpleMenuLayer *s_hist_menu_layer;
+static SimpleMenuItem s_hist_menu_items[HIST_MAX_ITEMS];
+static SimpleMenuSection s_hist_menu_section;
 
 static char s_status_text[STATUS_TEXT_MAX];
 
@@ -29,6 +44,12 @@ static uint32_t s_expected_reply_parts = 0;
 static uint32_t s_expected_reply_bytes = 0;
 static uint32_t s_received_reply_parts = 0;
 static bool s_vibrate_enabled = true;
+static bool s_hist_viewing = false;
+
+static AppMode s_app_mode = APP_MODE_CHAT;
+static uint16_t s_hist_expected_count = 0;
+static uint16_t s_hist_count = 0;
+static char s_hist_labels[HIST_MAX_ITEMS][HIST_LABEL_CHARS];
 
 static const uint32_t s_vibe_success_pattern[] = { 80, 80, 120, 80, 200 };
 static const uint32_t s_vibe_error_pattern[] = { 200, 120, 280 };
@@ -38,6 +59,15 @@ static const uint32_t s_vibe_prompt_pattern[] = { 60 };
 static DictationSession *s_dictation_session;
 static char s_transcript[TRANSCRIPT_MAX];
 #endif
+
+static void hist_menu_window_load(Window *window);
+static void hist_menu_window_unload(Window *window);
+static void hist_menu_window_appear(Window *window);
+static void hist_menu_show(void);
+static void hist_request_open(void);
+static void hist_send_get(uint8_t index);
+static void hist_labels_reset(void);
+static void hist_labels_parse(const char *src);
 
 static void vibe_play(const uint32_t *pattern, uint32_t segments) {
   VibePattern vibe;
@@ -131,6 +161,7 @@ static void reply_finalize(void) {
     }
     vibe_notify_error();
     reply_transfer_reset();
+    s_hist_viewing = false;
     return;
   }
 
@@ -159,10 +190,188 @@ static void reply_finalize(void) {
   layer_mark_dirty(text_layer_get_layer(s_reply_layer));
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 
-  set_status("Up/Down to scroll");
+  if (s_hist_viewing) {
+    set_status("Historique Up/Down");
+  } else {
+    set_status("Up/Down to scroll");
+  }
   vibe_notify_success();
 
   free(previous_display);
+}
+
+static void hist_labels_reset(void) {
+  s_hist_count = 0;
+  memset(s_hist_labels, 0, sizeof(s_hist_labels));
+}
+
+static void hist_labels_parse(const char *src) {
+  char buf[HIST_LABELS_BUF];
+  uint16_t parsed = 0;
+
+  hist_labels_reset();
+
+  if (src == NULL || src[0] == '\0') {
+    return;
+  }
+
+  strncpy(buf, src, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  char *token = strtok(buf, "|");
+  while (token != NULL && parsed < HIST_MAX_ITEMS) {
+    strncpy(s_hist_labels[parsed], token, HIST_LABEL_CHARS - 1);
+    s_hist_labels[parsed][HIST_LABEL_CHARS - 1] = '\0';
+    parsed += 1;
+    token = strtok(NULL, "|");
+  }
+
+  s_hist_count = parsed;
+}
+
+static void hist_labels_fill_missing(void) {
+  uint16_t target = s_hist_expected_count;
+
+  if (target > HIST_MAX_ITEMS) {
+    target = HIST_MAX_ITEMS;
+  }
+
+  while (s_hist_count < target) {
+    snprintf(s_hist_labels[s_hist_count], HIST_LABEL_CHARS, "#%u", (unsigned)(s_hist_count + 1));
+    s_hist_count += 1;
+  }
+
+  if (s_hist_count > target) {
+    s_hist_count = target;
+  }
+}
+
+static void hist_menu_item_callback(int index, void *context) {
+  if (index < 0 || index >= (int)s_hist_count) {
+    return;
+  }
+
+  s_hist_viewing = true;
+  s_app_mode = APP_MODE_CHAT;
+  reply_accum_reset();
+  set_status("Chargement...");
+  hist_send_get((uint8_t)index);
+
+  window_stack_pop(true);
+}
+
+static void hist_menu_back_click_handler(ClickRecognizerRef recognizer, void *context) {
+  window_stack_pop(true);
+  s_app_mode = APP_MODE_CHAT;
+}
+
+static void hist_menu_window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+  uint16_t i;
+
+  hist_labels_fill_missing();
+
+  for (i = 0; i < s_hist_count; i++) {
+    s_hist_menu_items[i].title = s_hist_labels[i];
+    s_hist_menu_items[i].subtitle = NULL;
+    s_hist_menu_items[i].callback = hist_menu_item_callback;
+  }
+
+  s_hist_menu_section.title = "Historique";
+  s_hist_menu_section.items = s_hist_menu_items;
+  s_hist_menu_section.num_items = s_hist_count;
+
+  s_hist_menu_layer = simple_menu_layer_create(bounds, window, &s_hist_menu_section, 1, NULL);
+  menu_layer_set_click_config_onto_window(simple_menu_layer_get_menu_layer(s_hist_menu_layer), window);
+  layer_add_child(window_layer, simple_menu_layer_get_layer(s_hist_menu_layer));
+}
+
+static void hist_menu_window_unload(Window *window) {
+  if (s_hist_menu_layer != NULL) {
+    simple_menu_layer_destroy(s_hist_menu_layer);
+    s_hist_menu_layer = NULL;
+  }
+}
+
+static void hist_menu_window_appear(Window *window) {
+  window_single_click_subscribe(BUTTON_ID_BACK, hist_menu_back_click_handler);
+}
+
+static void hist_menu_show(void) {
+  if (s_hist_count == 0) {
+    s_app_mode = APP_MODE_CHAT;
+    return;
+  }
+
+  if (s_hist_menu_window != NULL) {
+    window_destroy(s_hist_menu_window);
+    s_hist_menu_window = NULL;
+    s_hist_menu_layer = NULL;
+  }
+
+  s_hist_menu_window = window_create();
+  window_set_window_handlers(s_hist_menu_window, (WindowHandlers) {
+    .load = hist_menu_window_load,
+    .unload = hist_menu_window_unload,
+    .appear = hist_menu_window_appear,
+  });
+
+  s_app_mode = APP_MODE_HISTORY_MENU;
+  window_stack_push(s_hist_menu_window, true);
+}
+
+static void hist_send_get(uint8_t index) {
+  DictionaryIterator *out_iter = NULL;
+  AppMessageResult result = app_message_outbox_begin(&out_iter);
+
+  if (result != APP_MSG_OK || out_iter == NULL) {
+    set_status("Cannot send");
+    vibe_notify_error();
+    s_hist_viewing = false;
+    return;
+  }
+
+  if (dict_write_uint8(out_iter, MESSAGE_KEY_HIST_GET, index) != DICT_OK) {
+    set_status("Cannot send");
+    vibe_notify_error();
+    s_hist_viewing = false;
+    return;
+  }
+
+  result = app_message_outbox_send();
+  if (result != APP_MSG_OK) {
+    set_status("Cannot send");
+    vibe_notify_error();
+    s_hist_viewing = false;
+  }
+}
+
+static void hist_request_open(void) {
+  DictionaryIterator *out_iter = NULL;
+  AppMessageResult result = app_message_outbox_begin(&out_iter);
+
+  if (result != APP_MSG_OK || out_iter == NULL) {
+    set_status("Cannot send");
+    vibe_notify_error();
+    return;
+  }
+
+  if (dict_write_uint8(out_iter, MESSAGE_KEY_HIST_OPEN, 1) != DICT_OK) {
+    set_status("Cannot send");
+    vibe_notify_error();
+    return;
+  }
+
+  result = app_message_outbox_send();
+  if (result != APP_MSG_OK) {
+    set_status("Cannot send");
+    vibe_notify_error();
+    return;
+  }
+
+  s_app_mode = APP_MODE_HISTORY_WAIT;
+  set_status("Historique...");
 }
 
 #if defined(PBL_MICROPHONE)
@@ -218,6 +427,7 @@ static void send_prompt(const char *transcript) {
     return;
   }
 
+  s_hist_viewing = false;
   vibe_notify_prompt_sent();
 }
 
@@ -261,6 +471,24 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
     }
   }
 
+  tuple = dict_find(iter, MESSAGE_KEY_HIST_COUNT);
+  if (tuple != NULL) {
+    s_hist_expected_count = (uint16_t)tuple->value->uint32;
+    s_app_mode = APP_MODE_HISTORY_WAIT;
+
+    if (s_hist_expected_count == 0) {
+      s_app_mode = APP_MODE_CHAT;
+    }
+  }
+
+  tuple = dict_find(iter, MESSAGE_KEY_HIST_LABELS);
+  if (tuple != NULL && tuple->type == TUPLE_CSTRING && tuple->length > 0) {
+    hist_labels_parse(tuple->value->cstring);
+    hist_labels_fill_missing();
+    hist_menu_show();
+    s_app_mode = APP_MODE_HISTORY_MENU;
+  }
+
   tuple = dict_find(iter, MESSAGE_KEY_REPLY_PARTS);
   if (tuple != NULL) {
     s_expected_reply_parts = tuple->value->uint32;
@@ -285,6 +513,7 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
         set_status("Out of memory");
         vibe_notify_error();
         reply_accum_reset();
+        s_hist_viewing = false;
       } else {
         s_received_reply_parts += 1;
       }
@@ -300,11 +529,15 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
 static void inbox_dropped_callback(AppMessageResult reason, void *context) {
   set_status("Receive failed");
   vibe_notify_error();
+  s_hist_viewing = false;
+  s_app_mode = APP_MODE_CHAT;
 }
 
 static void outbox_failed_callback(DictionaryIterator *iter, AppMessageResult reason, void *context) {
   set_status("Cannot send");
   vibe_notify_error();
+  s_hist_viewing = false;
+  s_app_mode = APP_MODE_CHAT;
 }
 
 static void scroll_reply_layer(int delta_y) {
@@ -331,6 +564,18 @@ static void scroll_reply_layer(int delta_y) {
 
   scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, new_y), true);
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
+}
+
+static void back_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_app_mode == APP_MODE_HISTORY_MENU) {
+    return;
+  }
+
+  if (s_app_mode == APP_MODE_HISTORY_MENU) {
+    return;
+  }
+
+  hist_request_open();
 }
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
@@ -369,12 +614,14 @@ static void main_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
+  window_long_click_subscribe(BUTTON_ID_BACK, BACK_LONG_PRESS_MS, back_long_click_handler, NULL);
 }
 
 static void window_appear(Window *window) {
   if (s_action_bar != NULL) {
     action_bar_layer_set_click_config_provider(s_action_bar, main_click_config_provider);
   }
+  window_long_click_subscribe(BUTTON_ID_BACK, BACK_LONG_PRESS_MS, back_long_click_handler, NULL);
 }
 
 static void window_load(Window *window) {
@@ -406,7 +653,7 @@ static void window_load(Window *window) {
   action_bar_layer_set_background_color(s_action_bar, GColorBlack);
 
 #if defined(PBL_MICROPHONE)
-  set_status("SELECT to speak");
+  set_status("SELECT speak BACK hist");
 #else
   set_status("No microphone");
 #endif
@@ -463,6 +710,11 @@ static void deinit(void) {
     s_dictation_session = NULL;
   }
 #endif
+
+  if (s_hist_menu_window != NULL) {
+    window_destroy(s_hist_menu_window);
+    s_hist_menu_window = NULL;
+  }
 
   window_destroy(s_window);
 }

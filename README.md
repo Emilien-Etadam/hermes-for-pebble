@@ -32,6 +32,8 @@ In the Pebble app → **Settings** for *Hermes for Pebble*:
 | **Session** | Stable id for Hermes memory (`X-Hermes-Session-Key`), e.g. `pebble:you` |
 | **Fast replies** | Skips extended reasoning when supported (faster responses) |
 | **Vibration alerts** | Buzz when a reply is ready or when an error occurs |
+| **Local history** | Save recent exchanges on the phone (per Session key) |
+| **History size** | How many exchanges to keep (5, 10, or 20) |
 
 Tap **Test connection**, then **Save**. Settings stay on the phone; they are not stored on the watch.
 
@@ -40,6 +42,7 @@ Tap **Test connection**, then **Save**. Settings stay on the phone; they are not
 1. Open **Hermes for Pebble**.
 2. Press **SELECT** → speak → confirm transcription.
 3. Read the reply in the main area; **Up/Down** to scroll.
+4. **BACK (long press)** → browse previous exchanges for the current Session; **SELECT** on a line to read that reply again; **BACK** to leave the menu.
 
 ## Architecture
 
@@ -50,6 +53,11 @@ dictation → PROMPT    ──────► POST /v1/chat/completions
 ◄──────── REPLY_CHUNK (×N)    reply split into UTF-8 chunks
 ◄──────── REPLY_DONE          end of transfer
 ◄──────── STATUS              status / errors
+
+BACK long → HIST_OPEN ──────► read localStorage history
+◄──────── HIST_COUNT          number of saved exchanges
+◄──────── HIST_LABELS         menu titles (prompt preview)
+SELECT → HIST_GET     ──────► load one exchange’s reply (same chunk pipeline)
 ```
 
 ## Development
