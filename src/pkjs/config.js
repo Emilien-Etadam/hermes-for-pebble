@@ -11,7 +11,7 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: 'Set server & API key → <b>Test</b> → <b>Save</b> (required). Watch: <b>SELECT</b> speak, <b>Up/Down</b> scroll, <b>BACK long</b> history browse.'
+    defaultValue: 'Set server & API key → <b>Test</b> → <b>Save</b>. Watch icons: ▲ scroll/hist long, 🎤 speak, ▼ scroll, 🕐 history.'
   },
   {
     type: 'section',

@@ -17,7 +17,7 @@
 #define VIBE_SUCCESS_SEGMENTS 5
 #define VIBE_ERROR_SEGMENTS 3
 #define VIBE_PROMPT_SEGMENTS 1
-#define BACK_LONG_PRESS_MS 800
+#define UP_LONG_PRESS_MS 800
 
 typedef enum {
   APP_MODE_CHAT = 0,
@@ -30,6 +30,14 @@ static TextLayer *s_status_layer;
 static ScrollLayer *s_scroll_layer;
 static TextLayer *s_reply_layer;
 static ActionBarLayer *s_action_bar;
+static Layer *s_sidebar_layer;
+static GBitmap *s_icon_up;
+static GBitmap *s_icon_down;
+static GBitmap *s_icon_mic;
+static GBitmap *s_icon_history;
+static GBitmap *s_icon_read;
+static GBitmap *s_icon_back;
+#define SIDEBAR_ROWS 4
 
 static char s_status_text[STATUS_TEXT_MAX];
 
@@ -67,6 +75,11 @@ static void hist_browse_enter(void);
 static void hist_browse_render(void);
 static void hist_browse_exit(void);
 static void reply_display_refresh(void);
+static void action_bar_refresh_icons(void);
+static void sidebar_layer_update(Layer *layer, GContext *ctx);
+static void sidebar_destroy_icons(void);
+static void sidebar_load_icons(void);
+static void sidebar_draw_icon(GContext *ctx, GRect bounds, int row, const GBitmap *icon);
 
 static void vibe_play(const uint32_t *pattern, uint32_t segments) {
   VibePattern vibe;
@@ -293,11 +306,13 @@ static void hist_browse_enter(void) {
   s_hist_browse_index = 0;
   s_app_mode = APP_MODE_HISTORY_BROWSE;
   hist_browse_render();
+  action_bar_refresh_icons();
 }
 
 static void hist_browse_exit(void) {
   s_app_mode = APP_MODE_CHAT;
   reply_display_refresh();
+  action_bar_refresh_icons();
 #if defined(PBL_MICROPHONE)
   set_status("SELECT to speak");
 #else
@@ -356,6 +371,104 @@ static void hist_request_open(void) {
 
   s_app_mode = APP_MODE_HISTORY_WAIT;
   set_status("Historique...");
+}
+
+static void sidebar_draw_icon(GContext *ctx, GRect bounds, int row, const GBitmap *icon) {
+  if (icon == NULL || row < 0 || row >= SIDEBAR_ROWS) {
+    return;
+  }
+
+  const int row_h = bounds.size.h / SIDEBAR_ROWS;
+  const GRect icon_bounds = gbitmap_get_bounds(icon);
+  const GRect dest = GRect(
+    bounds.origin.x + (bounds.size.w - icon_bounds.size.w) / 2,
+    bounds.origin.y + row * row_h + (row_h - icon_bounds.size.h) / 2,
+    icon_bounds.size.w,
+    icon_bounds.size.h
+  );
+
+  graphics_draw_bitmap_in_rect(ctx, icon, dest);
+}
+
+static void sidebar_layer_update(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+
+  graphics_context_set_compositing_mode(ctx, GCompOpSet);
+
+  if (s_app_mode == APP_MODE_HISTORY_BROWSE) {
+    sidebar_draw_icon(ctx, bounds, 0, s_icon_up);
+    sidebar_draw_icon(ctx, bounds, 1, s_icon_read);
+    sidebar_draw_icon(ctx, bounds, 2, s_icon_down);
+    sidebar_draw_icon(ctx, bounds, 3, s_icon_back);
+    return;
+  }
+
+  sidebar_draw_icon(ctx, bounds, 0, s_icon_up);
+  sidebar_draw_icon(ctx, bounds, 1, s_icon_history);
+  sidebar_draw_icon(ctx, bounds, 2, s_icon_mic);
+  sidebar_draw_icon(ctx, bounds, 3, s_icon_down);
+}
+
+static void sidebar_load_icons(void) {
+  if (s_icon_up == NULL) {
+    s_icon_up = gbitmap_create_with_resource(RESOURCE_ID_ACTION_UP);
+  }
+  if (s_icon_down == NULL) {
+    s_icon_down = gbitmap_create_with_resource(RESOURCE_ID_ACTION_DOWN);
+  }
+  if (s_icon_mic == NULL) {
+    s_icon_mic = gbitmap_create_with_resource(RESOURCE_ID_ACTION_MIC);
+  }
+  if (s_icon_history == NULL) {
+    s_icon_history = gbitmap_create_with_resource(RESOURCE_ID_ACTION_HISTORY);
+  }
+  if (s_icon_read == NULL) {
+    s_icon_read = gbitmap_create_with_resource(RESOURCE_ID_ACTION_READ);
+  }
+  if (s_icon_back == NULL) {
+    s_icon_back = gbitmap_create_with_resource(RESOURCE_ID_ACTION_BACK);
+  }
+}
+
+static void sidebar_destroy_icons(void) {
+  if (s_icon_up != NULL) {
+    gbitmap_destroy(s_icon_up);
+    s_icon_up = NULL;
+  }
+  if (s_icon_down != NULL) {
+    gbitmap_destroy(s_icon_down);
+    s_icon_down = NULL;
+  }
+  if (s_icon_mic != NULL) {
+    gbitmap_destroy(s_icon_mic);
+    s_icon_mic = NULL;
+  }
+  if (s_icon_history != NULL) {
+    gbitmap_destroy(s_icon_history);
+    s_icon_history = NULL;
+  }
+  if (s_icon_read != NULL) {
+    gbitmap_destroy(s_icon_read);
+    s_icon_read = NULL;
+  }
+  if (s_icon_back != NULL) {
+    gbitmap_destroy(s_icon_back);
+    s_icon_back = NULL;
+  }
+}
+
+static void action_bar_refresh_icons(void) {
+  if (s_action_bar == NULL) {
+    return;
+  }
+
+  action_bar_layer_clear_icon(s_action_bar, BUTTON_ID_UP);
+  action_bar_layer_clear_icon(s_action_bar, BUTTON_ID_SELECT);
+  action_bar_layer_clear_icon(s_action_bar, BUTTON_ID_DOWN);
+
+  if (s_sidebar_layer != NULL) {
+    layer_mark_dirty(s_sidebar_layer);
+  }
 }
 
 #if defined(PBL_MICROPHONE)
@@ -554,7 +667,9 @@ static void back_short_click_handler(ClickRecognizerRef recognizer, void *contex
   }
 }
 
-static void back_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void up_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+  (void)recognizer;
+  (void)context;
   if (s_app_mode == APP_MODE_HISTORY_WAIT || s_app_mode == APP_MODE_HISTORY_BROWSE) {
     return;
   }
@@ -621,13 +736,13 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
 
 static void action_bar_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
+  window_long_click_subscribe(BUTTON_ID_UP, UP_LONG_PRESS_MS, up_long_click_handler, NULL);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
 
 static void main_window_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_BACK, back_short_click_handler);
-  window_long_click_subscribe(BUTTON_ID_BACK, BACK_LONG_PRESS_MS, back_long_click_handler, NULL);
 }
 
 static void window_appear(Window *window) {
@@ -661,10 +776,17 @@ static void window_load(Window *window) {
   scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_reply_layer));
   layer_add_child(window_layer, scroll_layer_get_layer(s_scroll_layer));
 
+  sidebar_load_icons();
+  s_sidebar_layer = layer_create(GRect(content_w, STATUS_HEIGHT, ACTION_BAR_WIDTH, bounds.size.h - STATUS_HEIGHT));
+  layer_set_update_proc(s_sidebar_layer, sidebar_layer_update);
+  layer_add_child(window_layer, s_sidebar_layer);
+
   s_action_bar = action_bar_layer_create();
   action_bar_layer_add_to_window(s_action_bar, window);
   action_bar_layer_set_click_config_provider(s_action_bar, action_bar_click_config_provider);
-  action_bar_layer_set_background_color(s_action_bar, GColorBlack);
+  action_bar_layer_set_background_color(s_action_bar, GColorClear);
+
+  action_bar_refresh_icons();
 
 #if defined(PBL_MICROPHONE)
   set_status("SELECT to speak");
@@ -674,6 +796,13 @@ static void window_load(Window *window) {
 }
 
 static void window_unload(Window *window) {
+  if (s_sidebar_layer != NULL) {
+    layer_destroy(s_sidebar_layer);
+    s_sidebar_layer = NULL;
+  }
+
+  sidebar_destroy_icons();
+
   if (s_action_bar != NULL) {
     action_bar_layer_remove_from_window(s_action_bar);
     action_bar_layer_destroy(s_action_bar);
