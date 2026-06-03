@@ -1,7 +1,7 @@
 {
   "name": "hermes-for-pebble",
   "author": "Hermes",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "keywords": [
     "pebble-app"
   ],
@@ -43,7 +43,38 @@
       "HIST_LABELS"
     ],
     "resources": {
-      "media": []
+      "media": [
+        {
+          "type": "png",
+          "name": "ACTION_UP",
+          "file": "action_up.png"
+        },
+        {
+          "type": "png",
+          "name": "ACTION_DOWN",
+          "file": "action_down.png"
+        },
+        {
+          "type": "png",
+          "name": "ACTION_MIC",
+          "file": "action_mic.png"
+        },
+        {
+          "type": "png",
+          "name": "ACTION_HISTORY",
+          "file": "action_history.png"
+        },
+        {
+          "type": "png",
+          "name": "ACTION_READ",
+          "file": "action_read.png"
+        },
+        {
+          "type": "png",
+          "name": "ACTION_BACK",
+          "file": "action_back.png"
+        }
+      ]
     }
   }
 }
