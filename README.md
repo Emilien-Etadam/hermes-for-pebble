@@ -42,15 +42,15 @@ Tap **Test connection**, then **Save**. Settings stay on the phone; they are not
 1. Open **Hermes for Pebble**.
 2. Press **SELECT** → speak → confirm transcription.
 3. Read the reply in the main area; **Up/Down** to scroll.
-4. **Double appui sur Up** → historique ; **Up/Down** pour choisir ; **▶** (SELECT) pour lire ; **BACK** pour quitter.
+4. **Appui long sur SELECT** (🕐) → historique ; **Up/Down** pour choisir ; **SELECT** (appui court) pour lire ; **BACK** pour quitter.
 
 Barre latérale droite (4 icônes) :
 
 | Icône | Fonction |
 |-------|----------|
 | ▲ | Défiler vers le haut |
-| 🕐 | Historique (**double appui Up**) |
-| 🎤 | Parler (SELECT) |
+| 🕐 | Historique (**appui long SELECT**) |
+| 🎤 | Parler (**appui court SELECT**) |
 | ▼ | Défiler vers le bas |
 
 ## Architecture
@@ -63,7 +63,7 @@ dictation → PROMPT    ──────► POST /v1/chat/completions
 ◄──────── REPLY_DONE          end of transfer
 ◄──────── STATUS              status / errors
 
-Double-Up → HIST_OPEN ──────► read localStorage history
+SELECT long → HIST_OPEN ────► read localStorage history
 ◄──────── HIST_COUNT          number of saved exchanges
 ◄──────── HIST_LABELS         menu titles (prompt preview)
 SELECT → HIST_GET     ──────► load one exchange’s reply (same chunk pipeline)

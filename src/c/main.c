@@ -17,9 +17,7 @@
 #define VIBE_SUCCESS_SEGMENTS 5
 #define VIBE_ERROR_SEGMENTS 3
 #define VIBE_PROMPT_SEGMENTS 1
-#define UP_DOUBLE_CLICK_MIN 2
-#define UP_DOUBLE_CLICK_MAX 2
-#define UP_DOUBLE_CLICK_TIMEOUT_MS 400
+#define SELECT_LONG_CLICK_MS 700
 
 typedef enum {
   APP_MODE_CHAT = 0,
@@ -671,7 +669,7 @@ static void back_short_click_handler(ClickRecognizerRef recognizer, void *contex
   }
 }
 
-static void up_double_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
   (void)recognizer;
   (void)context;
   if (s_app_mode == APP_MODE_HISTORY_WAIT || s_app_mode == APP_MODE_HISTORY_BROWSE) {
@@ -740,9 +738,8 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
 
 static void action_bar_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
-  window_multi_click_subscribe(BUTTON_ID_UP, UP_DOUBLE_CLICK_MIN, UP_DOUBLE_CLICK_MAX,
-                               UP_DOUBLE_CLICK_TIMEOUT_MS, true, up_double_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
+  window_long_click_subscribe(BUTTON_ID_SELECT, SELECT_LONG_CLICK_MS, select_long_click_handler, NULL);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
 
@@ -798,7 +795,7 @@ static void window_load(Window *window) {
   action_bar_refresh_icons();
 
 #if defined(PBL_MICROPHONE)
-  set_status("SELECT speak Upx2 hist");
+  set_status("SELECT parler long hist");
 #else
   set_status("No microphone");
 #endif

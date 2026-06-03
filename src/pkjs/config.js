@@ -11,7 +11,7 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: 'Set server & API key → <b>Test</b> → <b>Save</b>. Watch: ▲ ▼ scroll, 🎤 SELECT speak, 🕐 double-Up history.'
+    defaultValue: 'Set server & API key → <b>Test</b> → <b>Save</b>. Watch: ▲ ▼ scroll, 🎤 SELECT speak, 🕐 hold SELECT history.'
   },
   {
     type: 'section',
