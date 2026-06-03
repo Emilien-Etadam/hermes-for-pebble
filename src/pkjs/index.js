@@ -8,9 +8,15 @@ var CHUNK_BYTES = 180;
 var MAX_SINGLE_CHUNK_BYTES = 700;
 var CHUNK_SEND_DELAY_MS = 120;
 var CHAT_TIMEOUT_MS = 180000;
+var CHAT_TIMEOUT_FAST_MS = 45000;
 var DEFAULT_MODEL = 'hermes';
 var DEFAULT_SESSION_KEY = 'pebble:default';
 var CHAT_COMPLETIONS_PATH = '/v1/chat/completions';
+var TRANSCRIPT_SESSION_KEY = 'hermes-pebble-transcript-id';
+var FAST_SYSTEM_PROMPT =
+  'You are a concise voice assistant on a Pebble smartwatch. ' +
+  'Reply in one or two short sentences in the user language. ' +
+  'Do not use tools, web search, terminal, or file operations.';
 
 var pendingChunks = [];
 var chunkIndex = 0;
@@ -263,18 +269,52 @@ function normalizeReplyContent(content) {
 }
 
 function buildChatPayload(prompt, request, config) {
+  var fastMode = isNoThinkEnabled(config);
+  var messages = [{ role: 'user', content: prompt }];
+
+  if (fastMode) {
+    messages = [
+      { role: 'system', content: FAST_SYSTEM_PROMPT },
+      { role: 'user', content: prompt }
+    ];
+  }
+
   var body = {
     model: request.model,
-    messages: [{ role: 'user', content: prompt }],
+    messages: messages,
     stream: false
   };
 
-  if (isNoThinkEnabled(config)) {
+  if (fastMode) {
     body.reasoning_effort = 'none';
     body.extra_body = { think: false };
   }
 
   return body;
+}
+
+function createTranscriptSessionId() {
+  return 'pebble-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+function getTranscriptSessionId(fastMode) {
+  if (fastMode) {
+    return createTranscriptSessionId();
+  }
+
+  var stored = '';
+  try {
+    stored = pickString(localStorage.getItem(TRANSCRIPT_SESSION_KEY));
+  } catch (err) {
+    stored = '';
+  }
+
+  if (!stored) {
+    stored = createTranscriptSessionId();
+    localStorage.setItem(TRANSCRIPT_SESSION_KEY, stored);
+  }
+
+  return stored;
 }
 
 function extractReplyBody(responseText, options) {
@@ -498,12 +538,16 @@ function queryHermes(prompt, config) {
   }
 
   var noThink = isNoThinkEnabled(config);
+  var transcriptSessionId = getTranscriptSessionId(noThink);
+  var chatTimeoutMs = noThink ? CHAT_TIMEOUT_FAST_MS : CHAT_TIMEOUT_MS;
   sendStatus(noThink ? 'Hermes (fast)...' : 'Hermes thinking...');
   console.log(
     'Hermes POST ' + request.url +
     ' model=' + request.model +
     ' session=' + request.sessionKey +
+    ' transcript=' + transcriptSessionId +
     ' noThink=' + noThink +
+    ' timeoutMs=' + chatTimeoutMs +
     ' promptLen=' + (prompt ? prompt.length : 0)
   );
 
@@ -511,6 +555,7 @@ function queryHermes(prompt, config) {
   xhr.setRequestHeader('Content-Type', 'application/json');
   xhr.setRequestHeader('Authorization', 'Bearer ' + request.key);
   xhr.setRequestHeader('X-Hermes-Session-Key', request.sessionKey);
+  xhr.setRequestHeader('X-Hermes-Session-Id', transcriptSessionId);
 
   xhr.onreadystatechange = function () {
     if (xhr.readyState === 4) {
@@ -547,11 +592,15 @@ function queryHermes(prompt, config) {
     notifyWatchVibe('error');
   };
 
-  xhr.timeout = CHAT_TIMEOUT_MS;
+  xhr.timeout = chatTimeoutMs;
 
   xhr.ontimeout = function () {
     stopWaitTimer();
-    sendStatus('Hermes timeout');
+    if (noThink) {
+      sendStatus('Timeout 45s — config serveur');
+    } else {
+      sendStatus('Hermes timeout');
+    }
     notifyWatchVibe('error');
   };
 

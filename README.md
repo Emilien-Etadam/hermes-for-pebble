@@ -30,7 +30,7 @@ In the Pebble app → **Settings** for *Hermes for Pebble*:
 | **API key** | Your Hermes `API_SERVER_KEY` |
 | **Model** | e.g. `hermes` or `hermes-agent` |
 | **Session** | Stable id for Hermes memory (`X-Hermes-Session-Key`), e.g. `pebble:you` |
-| **Fast replies** | Skips extended reasoning when supported (faster responses) |
+| **Fast replies** | Short watch answers (45 s timeout). On the Hermes server, set `agent.reasoning_effort: none` and a low `agent.max_turns` (e.g. 5) in `config.yaml` for best results. |
 | **Vibration alerts** | Buzz when a reply is ready or when an error occurs |
 | **Local history** | Save recent exchanges on the phone (per Session key) |
 | **History size** | How many exchanges to keep (5, 10, or 20) |
@@ -59,6 +59,18 @@ BACK long → HIST_OPEN ──────► read localStorage history
 ◄──────── HIST_LABELS         menu titles (prompt preview)
 SELECT → HIST_GET     ──────► load one exchange’s reply (same chunk pipeline)
 ```
+
+## Hermes server tuning (recommended)
+
+Simple messages like « bonjour » can take minutes if the agent runs with full tools and many turns. In `~/.hermes/config.yaml`:
+
+```yaml
+agent:
+  reasoning_effort: none
+  max_turns: 5
+```
+
+Restart the gateway after editing. The Pebble app’s **Fast replies** mode adds a short system prompt and a 45 s client timeout, but the server config above is what makes Hermes respond quickly.
 
 ## Development
 
