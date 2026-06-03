@@ -17,7 +17,9 @@
 #define VIBE_SUCCESS_SEGMENTS 5
 #define VIBE_ERROR_SEGMENTS 3
 #define VIBE_PROMPT_SEGMENTS 1
-#define UP_LONG_PRESS_MS 800
+#define UP_DOUBLE_CLICK_MIN 2
+#define UP_DOUBLE_CLICK_MAX 2
+#define UP_DOUBLE_CLICK_TIMEOUT_MS 400
 
 typedef enum {
   APP_MODE_CHAT = 0,
@@ -393,6 +395,8 @@ static void sidebar_draw_icon(GContext *ctx, GRect bounds, int row, const GBitma
 static void sidebar_layer_update(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
 
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, bounds, 0, GCornerNone);
   graphics_context_set_compositing_mode(ctx, GCompOpSet);
 
   if (s_app_mode == APP_MODE_HISTORY_BROWSE) {
@@ -667,7 +671,7 @@ static void back_short_click_handler(ClickRecognizerRef recognizer, void *contex
   }
 }
 
-static void up_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void up_double_click_handler(ClickRecognizerRef recognizer, void *context) {
   (void)recognizer;
   (void)context;
   if (s_app_mode == APP_MODE_HISTORY_WAIT || s_app_mode == APP_MODE_HISTORY_BROWSE) {
@@ -736,7 +740,8 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
 
 static void action_bar_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
-  window_long_click_subscribe(BUTTON_ID_UP, UP_LONG_PRESS_MS, up_long_click_handler, NULL);
+  window_multi_click_subscribe(BUTTON_ID_UP, UP_DOUBLE_CLICK_MIN, UP_DOUBLE_CLICK_MAX,
+                               UP_DOUBLE_CLICK_TIMEOUT_MS, true, up_double_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
 }
@@ -776,37 +781,37 @@ static void window_load(Window *window) {
   scroll_layer_add_child(s_scroll_layer, text_layer_get_layer(s_reply_layer));
   layer_add_child(window_layer, scroll_layer_get_layer(s_scroll_layer));
 
-  sidebar_load_icons();
-  s_sidebar_layer = layer_create(GRect(content_w, STATUS_HEIGHT, ACTION_BAR_WIDTH, bounds.size.h - STATUS_HEIGHT));
-  layer_set_update_proc(s_sidebar_layer, sidebar_layer_update);
-  layer_add_child(window_layer, s_sidebar_layer);
-
   s_action_bar = action_bar_layer_create();
   action_bar_layer_add_to_window(s_action_bar, window);
   action_bar_layer_set_click_config_provider(s_action_bar, action_bar_click_config_provider);
-  action_bar_layer_set_background_color(s_action_bar, GColorClear);
+  action_bar_layer_set_background_color(s_action_bar, GColorBlack);
+
+  sidebar_load_icons();
+  {
+    Layer *bar_layer = action_bar_layer_get_layer(s_action_bar);
+    GRect bar_bounds = layer_get_bounds(bar_layer);
+    s_sidebar_layer = layer_create(bar_bounds);
+    layer_set_update_proc(s_sidebar_layer, sidebar_layer_update);
+    layer_add_child(bar_layer, s_sidebar_layer);
+  }
 
   action_bar_refresh_icons();
 
 #if defined(PBL_MICROPHONE)
-  set_status("SELECT to speak");
+  set_status("SELECT speak Upx2 hist");
 #else
   set_status("No microphone");
 #endif
 }
 
 static void window_unload(Window *window) {
-  if (s_sidebar_layer != NULL) {
-    layer_destroy(s_sidebar_layer);
-    s_sidebar_layer = NULL;
-  }
-
   sidebar_destroy_icons();
 
   if (s_action_bar != NULL) {
     action_bar_layer_remove_from_window(s_action_bar);
     action_bar_layer_destroy(s_action_bar);
     s_action_bar = NULL;
+    s_sidebar_layer = NULL;
   }
 
   text_layer_set_text(s_reply_layer, "");
