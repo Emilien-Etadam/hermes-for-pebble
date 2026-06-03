@@ -12,6 +12,7 @@
 #define HIST_MAX_ITEMS 20
 #define HIST_LABEL_CHARS 32
 #define HIST_LABELS_BUF 512
+#define HIST_BROWSE_TEXT_MAX 640
 
 #define VIBE_SUCCESS_SEGMENTS 5
 #define VIBE_ERROR_SEGMENTS 3
@@ -21,7 +22,7 @@
 typedef enum {
   APP_MODE_CHAT = 0,
   APP_MODE_HISTORY_WAIT,
-  APP_MODE_HISTORY_MENU
+  APP_MODE_HISTORY_BROWSE
 } AppMode;
 
 static Window *s_window;
@@ -29,11 +30,6 @@ static TextLayer *s_status_layer;
 static ScrollLayer *s_scroll_layer;
 static TextLayer *s_reply_layer;
 static ActionBarLayer *s_action_bar;
-
-static Window *s_hist_menu_window;
-static SimpleMenuLayer *s_hist_menu_layer;
-static SimpleMenuItem s_hist_menu_items[HIST_MAX_ITEMS];
-static SimpleMenuSection s_hist_menu_section;
 
 static char s_status_text[STATUS_TEXT_MAX];
 
@@ -49,7 +45,9 @@ static bool s_hist_viewing = false;
 static AppMode s_app_mode = APP_MODE_CHAT;
 static uint16_t s_hist_expected_count = 0;
 static uint16_t s_hist_count = 0;
+static uint16_t s_hist_browse_index = 0;
 static char s_hist_labels[HIST_MAX_ITEMS][HIST_LABEL_CHARS];
+static char s_hist_browse_text[HIST_BROWSE_TEXT_MAX];
 
 static const uint32_t s_vibe_success_pattern[] = { 80, 80, 120, 80, 200 };
 static const uint32_t s_vibe_error_pattern[] = { 200, 120, 280 };
@@ -60,14 +58,15 @@ static DictationSession *s_dictation_session;
 static char s_transcript[TRANSCRIPT_MAX];
 #endif
 
-static void hist_menu_window_load(Window *window);
-static void hist_menu_window_unload(Window *window);
-static void hist_menu_window_appear(Window *window);
-static void hist_menu_show(void);
 static void hist_request_open(void);
 static void hist_send_get(uint8_t index);
 static void hist_labels_reset(void);
 static void hist_labels_parse(const char *src);
+static void hist_labels_fill_missing(void);
+static void hist_browse_enter(void);
+static void hist_browse_render(void);
+static void hist_browse_exit(void);
+static void reply_display_refresh(void);
 
 static void vibe_play(const uint32_t *pattern, uint32_t segments) {
   VibePattern vibe;
@@ -146,6 +145,26 @@ static bool reply_accum_append(const char *chunk) {
   return true;
 }
 
+static void reply_display_refresh(void) {
+  const char *text = s_reply_display ? s_reply_display : "";
+  const int scroll_width = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.w;
+
+  text_layer_set_size(s_reply_layer, GSize(scroll_width, 20000));
+  text_layer_set_text(s_reply_layer, text);
+
+  GSize content_size = text_layer_get_content_size(s_reply_layer);
+  if (content_size.h < REPLY_LINE_HEIGHT) {
+    content_size.h = REPLY_LINE_HEIGHT;
+  }
+
+  text_layer_set_size(s_reply_layer, GSize(scroll_width, content_size.h));
+  scroll_layer_set_content_size(s_scroll_layer, GSize(scroll_width, content_size.h));
+  scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, 0), false);
+  layer_set_hidden(text_layer_get_layer(s_reply_layer), false);
+  layer_mark_dirty(text_layer_get_layer(s_reply_layer));
+  layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
+}
+
 static void reply_finalize(void) {
   char *previous_display = s_reply_display;
 
@@ -172,23 +191,7 @@ static void reply_finalize(void) {
   s_expected_reply_bytes = 0;
   s_received_reply_parts = 0;
 
-  const char *text = s_reply_display;
-  const int scroll_width = layer_get_bounds(scroll_layer_get_layer(s_scroll_layer)).size.w;
-
-  text_layer_set_size(s_reply_layer, GSize(scroll_width, 20000));
-  text_layer_set_text(s_reply_layer, text);
-
-  GSize content_size = text_layer_get_content_size(s_reply_layer);
-  if (content_size.h < REPLY_LINE_HEIGHT) {
-    content_size.h = REPLY_LINE_HEIGHT;
-  }
-
-  text_layer_set_size(s_reply_layer, GSize(scroll_width, content_size.h));
-  scroll_layer_set_content_size(s_scroll_layer, GSize(scroll_width, content_size.h));
-  scroll_layer_set_content_offset(s_scroll_layer, GPoint(0, 0), false);
-  layer_set_hidden(text_layer_get_layer(s_reply_layer), false);
-  layer_mark_dirty(text_layer_get_layer(s_reply_layer));
-  layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
+  reply_display_refresh();
 
   if (s_hist_viewing) {
     set_status("Historique Up/Down");
@@ -246,79 +249,60 @@ static void hist_labels_fill_missing(void) {
   }
 }
 
-static void hist_menu_item_callback(int index, void *context) {
-  if (index < 0 || index >= (int)s_hist_count) {
+static void hist_browse_render(void) {
+  char line[HIST_LABEL_CHARS + 4];
+  char *cursor = s_hist_browse_text;
+  char *end = s_hist_browse_text + sizeof(s_hist_browse_text);
+  uint16_t i;
+
+  if (s_hist_count == 0) {
+    s_hist_browse_text[0] = '\0';
+    text_layer_set_text(s_reply_layer, "");
+    set_status("Historique vide");
     return;
   }
 
-  s_hist_viewing = true;
-  s_app_mode = APP_MODE_CHAT;
-  reply_accum_reset();
-  set_status("Chargement...");
-  hist_send_get((uint8_t)index);
-
-  window_stack_pop(true);
-}
-
-static void hist_menu_back_click_handler(ClickRecognizerRef recognizer, void *context) {
-  window_stack_pop(true);
-  s_app_mode = APP_MODE_CHAT;
-}
-
-static void hist_menu_window_load(Window *window) {
-  Layer *window_layer = window_get_root_layer(window);
-  GRect bounds = layer_get_bounds(window_layer);
-  uint16_t i;
-
-  hist_labels_fill_missing();
+  if (s_hist_browse_index >= s_hist_count) {
+    s_hist_browse_index = s_hist_count - 1;
+  }
 
   for (i = 0; i < s_hist_count; i++) {
-    s_hist_menu_items[i].title = s_hist_labels[i];
-    s_hist_menu_items[i].subtitle = NULL;
-    s_hist_menu_items[i].callback = hist_menu_item_callback;
+    snprintf(line, sizeof(line), "%s %s\n", (i == s_hist_browse_index) ? ">" : " ", s_hist_labels[i]);
+    if (cursor + strlen(line) >= end) {
+      break;
+    }
+    strcpy(cursor, line);
+    cursor += strlen(line);
   }
 
-  s_hist_menu_section.title = "Historique";
-  s_hist_menu_section.items = s_hist_menu_items;
-  s_hist_menu_section.num_items = s_hist_count;
+  *cursor = '\0';
+  text_layer_set_text(s_reply_layer, s_hist_browse_text);
+  layer_mark_dirty(text_layer_get_layer(s_reply_layer));
 
-  s_hist_menu_layer = simple_menu_layer_create(bounds, window, &s_hist_menu_section, 1, NULL);
-  menu_layer_set_click_config_onto_window(simple_menu_layer_get_menu_layer(s_hist_menu_layer), window);
-  layer_add_child(window_layer, simple_menu_layer_get_layer(s_hist_menu_layer));
+  snprintf(s_status_text, sizeof(s_status_text), "Hist %u/%u SEL=read",
+           (unsigned)(s_hist_browse_index + 1), (unsigned)s_hist_count);
+  text_layer_set_text(s_status_layer, s_status_text);
 }
 
-static void hist_menu_window_unload(Window *window) {
-  if (s_hist_menu_layer != NULL) {
-    simple_menu_layer_destroy(s_hist_menu_layer);
-    s_hist_menu_layer = NULL;
-  }
-}
-
-static void hist_menu_window_appear(Window *window) {
-  window_single_click_subscribe(BUTTON_ID_BACK, hist_menu_back_click_handler);
-}
-
-static void hist_menu_show(void) {
+static void hist_browse_enter(void) {
   if (s_hist_count == 0) {
     s_app_mode = APP_MODE_CHAT;
     return;
   }
 
-  if (s_hist_menu_window != NULL) {
-    window_destroy(s_hist_menu_window);
-    s_hist_menu_window = NULL;
-    s_hist_menu_layer = NULL;
-  }
+  s_hist_browse_index = 0;
+  s_app_mode = APP_MODE_HISTORY_BROWSE;
+  hist_browse_render();
+}
 
-  s_hist_menu_window = window_create();
-  window_set_window_handlers(s_hist_menu_window, (WindowHandlers) {
-    .load = hist_menu_window_load,
-    .unload = hist_menu_window_unload,
-    .appear = hist_menu_window_appear,
-  });
-
-  s_app_mode = APP_MODE_HISTORY_MENU;
-  window_stack_push(s_hist_menu_window, true);
+static void hist_browse_exit(void) {
+  s_app_mode = APP_MODE_CHAT;
+  reply_display_refresh();
+#if defined(PBL_MICROPHONE)
+  set_status("SELECT to speak");
+#else
+  set_status("No microphone");
+#endif
 }
 
 static void hist_send_get(uint8_t index) {
@@ -474,7 +458,6 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
   tuple = dict_find(iter, MESSAGE_KEY_HIST_COUNT);
   if (tuple != NULL) {
     s_hist_expected_count = (uint16_t)tuple->value->uint32;
-    s_app_mode = APP_MODE_HISTORY_WAIT;
 
     if (s_hist_expected_count == 0) {
       s_app_mode = APP_MODE_CHAT;
@@ -485,8 +468,7 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context) {
   if (tuple != NULL && tuple->type == TUPLE_CSTRING && tuple->length > 0) {
     hist_labels_parse(tuple->value->cstring);
     hist_labels_fill_missing();
-    hist_menu_show();
-    s_app_mode = APP_MODE_HISTORY_MENU;
+    hist_browse_enter();
   }
 
   tuple = dict_find(iter, MESSAGE_KEY_REPLY_PARTS);
@@ -566,12 +548,14 @@ static void scroll_reply_layer(int delta_y) {
   layer_mark_dirty(scroll_layer_get_layer(s_scroll_layer));
 }
 
-static void back_long_click_handler(ClickRecognizerRef recognizer, void *context) {
-  if (s_app_mode == APP_MODE_HISTORY_MENU) {
-    return;
+static void back_short_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_app_mode == APP_MODE_HISTORY_BROWSE) {
+    hist_browse_exit();
   }
+}
 
-  if (s_app_mode == APP_MODE_HISTORY_MENU) {
+static void back_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_app_mode == APP_MODE_HISTORY_WAIT || s_app_mode == APP_MODE_HISTORY_BROWSE) {
     return;
   }
 
@@ -579,6 +563,15 @@ static void back_long_click_handler(ClickRecognizerRef recognizer, void *context
 }
 
 static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_app_mode == APP_MODE_HISTORY_BROWSE) {
+    s_hist_viewing = true;
+    s_app_mode = APP_MODE_CHAT;
+    reply_accum_reset();
+    set_status("Chargement...");
+    hist_send_get((uint8_t)s_hist_browse_index);
+    return;
+  }
+
 #if defined(PBL_MICROPHONE)
   if (s_dictation_session == NULL) {
     set_status("Dictation unavailable");
@@ -595,6 +588,14 @@ static void select_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_app_mode == APP_MODE_HISTORY_BROWSE) {
+    if (s_hist_browse_index > 0) {
+      s_hist_browse_index -= 1;
+      hist_browse_render();
+    }
+    return;
+  }
+
   if (s_scroll_layer != NULL) {
     scroll_layer_scroll_up_click_handler(recognizer, s_scroll_layer);
     return;
@@ -603,6 +604,14 @@ static void up_click_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (s_app_mode == APP_MODE_HISTORY_BROWSE) {
+    if (s_hist_browse_index + 1 < s_hist_count) {
+      s_hist_browse_index += 1;
+      hist_browse_render();
+    }
+    return;
+  }
+
   if (s_scroll_layer != NULL) {
     scroll_layer_scroll_down_click_handler(recognizer, s_scroll_layer);
     return;
@@ -610,24 +619,29 @@ static void down_click_handler(ClickRecognizerRef recognizer, void *context) {
   scroll_reply_layer(SCROLL_STEP_PX);
 }
 
-static void main_click_config_provider(void *context) {
+static void action_bar_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, up_click_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, select_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, down_click_handler);
+}
+
+static void main_window_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_BACK, back_short_click_handler);
   window_long_click_subscribe(BUTTON_ID_BACK, BACK_LONG_PRESS_MS, back_long_click_handler, NULL);
 }
 
 static void window_appear(Window *window) {
   if (s_action_bar != NULL) {
-    action_bar_layer_set_click_config_provider(s_action_bar, main_click_config_provider);
+    action_bar_layer_set_click_config_provider(s_action_bar, action_bar_click_config_provider);
   }
-  window_long_click_subscribe(BUTTON_ID_BACK, BACK_LONG_PRESS_MS, back_long_click_handler, NULL);
 }
 
 static void window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
   const int16_t content_w = bounds.size.w - ACTION_BAR_WIDTH;
+
+  window_set_click_config_provider(window, main_window_click_config_provider);
 
   s_status_layer = text_layer_create(GRect(0, 0, bounds.size.w, STATUS_HEIGHT));
   text_layer_set_font(s_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
@@ -649,11 +663,11 @@ static void window_load(Window *window) {
 
   s_action_bar = action_bar_layer_create();
   action_bar_layer_add_to_window(s_action_bar, window);
-  action_bar_layer_set_click_config_provider(s_action_bar, main_click_config_provider);
+  action_bar_layer_set_click_config_provider(s_action_bar, action_bar_click_config_provider);
   action_bar_layer_set_background_color(s_action_bar, GColorBlack);
 
 #if defined(PBL_MICROPHONE)
-  set_status("SELECT speak BACK hist");
+  set_status("SELECT to speak");
 #else
   set_status("No microphone");
 #endif
@@ -710,11 +724,6 @@ static void deinit(void) {
     s_dictation_session = NULL;
   }
 #endif
-
-  if (s_hist_menu_window != NULL) {
-    window_destroy(s_hist_menu_window);
-    s_hist_menu_window = NULL;
-  }
 
   window_destroy(s_window);
 }

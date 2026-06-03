@@ -42,7 +42,7 @@ Tap **Test connection**, then **Save**. Settings stay on the phone; they are not
 1. Open **Hermes for Pebble**.
 2. Press **SELECT** → speak → confirm transcription.
 3. Read the reply in the main area; **Up/Down** to scroll.
-4. **BACK (long press)** → browse previous exchanges for the current Session; **SELECT** on a line to read that reply again; **BACK** to leave the menu.
+4. **BACK (long press)** → browse previous exchanges; **Up/Down** to pick one; **SELECT** to read that reply; **BACK** to exit browse mode.
 
 ## Architecture
 
