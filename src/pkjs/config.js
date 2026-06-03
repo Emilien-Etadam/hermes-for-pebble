@@ -11,7 +11,7 @@ module.exports = [
   },
   {
     type: 'text',
-    defaultValue: 'Set server & API key → <b>Test</b> → <b>Save</b> (required). Watch: <b>SELECT</b> to speak, <b>Up/Down</b> to scroll.'
+    defaultValue: 'Set server & API key → <b>Test</b> → <b>Save</b> (required). Watch: <b>SELECT</b> speak, <b>Up/Down</b> scroll, <b>BACK long</b> history.'
   },
   {
     type: 'section',
@@ -66,6 +66,24 @@ module.exports = [
         label: 'Vibration alerts',
         description: 'Buzz on reply ready and errors',
         defaultValue: true
+      },
+      {
+        type: 'toggle',
+        messageKey: 'HISTORY_ON',
+        label: 'Local history',
+        description: 'Save exchanges on phone for BACK long on watch',
+        defaultValue: true
+      },
+      {
+        type: 'select',
+        messageKey: 'HISTORY_MAX',
+        label: 'History size',
+        defaultValue: '10',
+        options: [
+          { value: '5', label: '5 exchanges' },
+          { value: '10', label: '10 exchanges' },
+          { value: '20', label: '20 exchanges' }
+        ]
       }
     ]
   },

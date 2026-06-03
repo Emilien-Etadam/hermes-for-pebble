@@ -1,6 +1,7 @@
 var Clay = require('pebble-clay');
 var clayConfig = require('./config');
 var customClay = require('./custom-clay');
+var history = require('./history');
 var clay = new Clay(clayConfig, customClay, { autoHandleEvents: false });
 
 var CHUNK_BYTES = 180;
@@ -150,6 +151,16 @@ function ensureConfigDefaults() {
 
   if (stored.VIBRATE_ON === undefined) {
     stored.VIBRATE_ON = true;
+    changed = true;
+  }
+
+  if (stored.HISTORY_ON === undefined) {
+    stored.HISTORY_ON = true;
+    changed = true;
+  }
+
+  if (!pickString(stored.HISTORY_MAX)) {
+    stored.HISTORY_MAX = '10';
     changed = true;
   }
 
@@ -369,6 +380,68 @@ function sendNextChunk() {
   });
 }
 
+function saveExchangeToHistory(prompt, replyText, config) {
+  var request = resolveHermesRequest(config);
+  var settings = history.getHistorySettings(getStoredSettings());
+  history.appendExchange(request.sessionKey, prompt, replyText, settings);
+}
+
+function handleHistOpen() {
+  var config = getConfig();
+  var settings = history.getHistorySettings(getStoredSettings());
+  var request = resolveHermesRequest(config);
+
+  if (!settings.enabled) {
+    sendStatus('Historique off');
+    Pebble.sendAppMessage({ HIST_COUNT: 0 }, null, function (err) {
+      console.log('Failed to send HIST_COUNT: ' + JSON.stringify(err));
+    });
+    return;
+  }
+
+  var entries = history.listEntries(request.sessionKey);
+  var count = entries.length;
+  var labels = history.buildMenuLabelsString(request.sessionKey);
+
+  console.log('History open: count=' + count + ' session=' + request.sessionKey);
+
+  Pebble.sendAppMessage({ HIST_COUNT: count }, function () {
+    if (count === 0) {
+      sendStatus('Historique vide');
+      return;
+    }
+    Pebble.sendAppMessage({ HIST_LABELS: labels }, null, function (err) {
+      console.log('Failed to send HIST_LABELS: ' + JSON.stringify(err));
+      sendStatus('Historique err');
+    });
+  }, function (err) {
+    console.log('Failed to send HIST_COUNT: ' + JSON.stringify(err));
+    sendStatus('Historique err');
+  });
+}
+
+function handleHistGet(index) {
+  var config = getConfig();
+  var request = resolveHermesRequest(config);
+  var idx = parseInt(index, 10);
+
+  if (isNaN(idx) || idx < 0) {
+    sendStatus('Historique err');
+    return;
+  }
+
+  var entry = history.getEntry(request.sessionKey, idx);
+  if (!entry || !entry.reply) {
+    sendStatus('Introuvable');
+    return;
+  }
+
+  var total = history.listEntries(request.sessionKey).length;
+  var part = idx + 1;
+  sendStatus('Hist ' + part + '/' + total);
+  sendReplyChunks(entry.reply);
+}
+
 function sendReplyChunks(text) {
   pendingChunks = prepareReplyChunks(text);
   if (!pendingChunks.length) {
@@ -453,6 +526,7 @@ function queryHermes(prompt, config) {
       try {
         var replyText = extractReplyBody(xhr.responseText, { skipReasoning: noThink }).trim();
         console.log('Hermes reply chars=' + replyText.length);
+        saveExchangeToHistory(prompt, replyText, config);
         sendReplyChunks(replyText);
       } catch (err) {
         console.log('Invalid Hermes response: ' + err);
@@ -492,7 +566,21 @@ function queryHermes(prompt, config) {
 
 Pebble.addEventListener('appmessage', function (e) {
   var payload = e.payload;
-  if (!payload || !payload.PROMPT) {
+  if (!payload) {
+    return;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'HIST_OPEN')) {
+    handleHistOpen();
+    return;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'HIST_GET')) {
+    handleHistGet(payload.HIST_GET);
+    return;
+  }
+
+  if (!payload.PROMPT) {
     return;
   }
 
