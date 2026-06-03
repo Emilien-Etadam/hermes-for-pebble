@@ -57,7 +57,7 @@ module.exports = [
         type: 'toggle',
         messageKey: 'NO_THINK',
         label: 'Fast replies',
-        description: 'Skip extended reasoning when supported',
+        description: 'Short answers, 45s limit. Server: agent.reasoning_effort: none, max_turns: 5',
         defaultValue: true
       },
       {
